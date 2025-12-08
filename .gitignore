@@ -1,0 +1,11 @@
+data/*
+.venv/
+src/audiosep/__pycache__/
+src/audiosep/data/__pycache__/
+src/audiosep/models/__pycache__/
+
+src/audiosep.egg-info/
+lightning_logs/
+wandb/
+
+.DS_Store
