@@ -14,7 +14,7 @@ logger = WandbLogger(project="audio-separation", name="spectro_UNetSkip2D_run", 
 dm = VoiceNoiseDatamodule(
     train_data_dir="data/train",
     test_data_dir="data/test",
-    batch_size=16,
+    batch_size=128,
     num_workers=0,
     seed=42,
 )
@@ -31,5 +31,6 @@ model = SpectroUNetSkip2D(in_channels=1, out_channels=2)
 
 # Trainer
 callback = ModelCheckpoint(every_n_epochs=5, dirpath=ckpt_dir, filename="{epoch:02d}")
-trainer = Trainer(max_epochs=100, accelerator="auto", logger=logger, callbacks=[callback])
+# Logging every 10 steps to ensure training logs appear even when epoch has fewer batches
+trainer = Trainer(max_epochs=100, accelerator="auto", logger=logger, callbacks=[callback], log_every_n_steps=10)
 trainer.fit(model, dm)
