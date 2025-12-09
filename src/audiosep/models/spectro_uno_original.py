@@ -131,3 +131,6 @@ class SpectroUNetOriginal(L.LightningModule):
 
     def test_step(self, batch, _):
         self._shared_step(batch)
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=1e-4)
