@@ -281,7 +281,7 @@ wheels = [
 [[package]]
 name = "audiosep"
 version = "0.0.1"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "librosa" },
     { name = "lightning" },

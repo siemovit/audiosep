@@ -27,3 +27,9 @@ dev = [
 
 [tools.mypy]
 mypy_path = './src'
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+editable_library = { path = "src/", editable = true }
