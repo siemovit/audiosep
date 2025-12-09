@@ -8,4 +8,6 @@ src/audiosep.egg-info/
 lightning_logs/
 wandb/
 
+src/audiosep/data/spectrogram/__pycache__
+
 .DS_Store
