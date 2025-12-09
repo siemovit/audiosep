@@ -9,7 +9,7 @@ import os
 
 # Run in another terminal: tensorboard --logdir lightning_logs --port 6006
 # logger = TensorBoardLogger("lightning_logs", name="tb_run")
-logger = WandbLogger(project="audio-separation", name="spectro_UNetSkip2D_run", log_model="all")
+logger = WandbLogger(project="audiosep", name="spectro_UNetSkip2D_run", log_model="all")
 
 dm = VoiceNoiseDatamodule(
     train_data_dir="data/train",
