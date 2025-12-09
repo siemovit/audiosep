@@ -14,7 +14,10 @@ dependencies = [
     "librosa>=0.10.0",
     "lightning>=2.0.0",
     "tensorboard>=2.12.0",
-    "wandb>=0.12.10"
+    "wandb>=0.12.10",
+    "torchaudio>=2.9.1",
+    "pesq>=0.0.4",
+    "torchcodec>=0.9.0",
 ]
 [project.urls]
 Homepage = "https://github.com/siemovit/audiosep"
