@@ -27,3 +27,12 @@ Source = "https://github.com/siemovit/audiosep"
 dev = [
     "wandb>=0.23.1",
 ]
+
+[tools.mypy]
+mypy_path = './src'
+
+[tool.uv]
+package = true
+
+[tool.uv.sources]
+editable_library = { path = "src/", editable = true }

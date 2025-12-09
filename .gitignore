@@ -11,4 +11,6 @@ wandb/
 
 .DS_Store
 *.pyc
+__pycache__/*
+**/*/__pycache__/*
 __pycache__/
