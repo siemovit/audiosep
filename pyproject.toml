@@ -19,3 +19,8 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/siemovit/audiosep"
 Source = "https://github.com/siemovit/audiosep"
+
+[dependency-groups]
+dev = [
+    "wandb>=0.23.1",
+]

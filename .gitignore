@@ -9,3 +9,5 @@ lightning_logs/
 wandb/
 
 .DS_Store
+*.pyc
+__pycache__/
