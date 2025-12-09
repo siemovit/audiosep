@@ -58,7 +58,7 @@ class SpectroUNetSkip2D(L.LightningModule):
                 nn.ReLU(inplace=True),
             ]
             if dropout:
-                layers.insert(1, nn.Dropout2d(0.5))
+                layers.insert(1, nn.Dropout2d(0.3))
             return nn.Sequential(*layers)
 
         # Decoder layers with skip connections
