@@ -29,8 +29,8 @@ device = "mps" if torch.backends.mps.is_available() else "cpu"
 max_len=32000 if device == "mps" else 80000
     
 dm = WaveDatamodule(
-    train_data_dir="data/train_small",
-    test_data_dir="data/test_small",
+    train_data_dir="data/train",
+    test_data_dir="data/test",
     batch_size=args.batch_size,
     num_workers=0,
     seed=42,
@@ -60,4 +60,4 @@ os.makedirs(ckpt_dir, exist_ok=True)
 callback = ModelCheckpoint(every_n_epochs=5, dirpath=ckpt_dir, filename="{epoch:02d}")
 # Logging every 10 steps to ensure training logs appear even when epoch has fewer batches
 trainer = Trainer(max_epochs=args.max_epochs, accelerator="auto", logger=logger, callbacks=[callback], log_every_n_steps=10)
-# trainer.fit(model, dm)
+trainer.fit(model, dm)
