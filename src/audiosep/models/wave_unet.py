@@ -6,6 +6,7 @@ from typing import List
 
 from torchmetrics.audio.snr import ScaleInvariantSignalNoiseRatio
 from torchmetrics.audio.pesq import PerceptualEvaluationSpeechQuality
+from torchmetrics.audio.stoi import ShortTimeObjectiveIntelligibility
 import torch
 
 class ConvBlock(nn.Module):
@@ -71,6 +72,7 @@ class WaveUNet(L.LightningModule):
         # metrics
         self.si_snr = ScaleInvariantSignalNoiseRatio()
         self.pesq = PerceptualEvaluationSpeechQuality(fs=8000, mode="nb")
+        self.stoi = ShortTimeObjectiveIntelligibility(fs=8000, extended=False)
 
         # ----------- Encoder -----------
         # encoder/decoder config
@@ -105,7 +107,10 @@ class WaveUNet(L.LightningModule):
             nn.Conv1d(self.base_filters + self.in_channels, self.out_channels, kernel_size=1, stride=1),
             nn.Tanh(),
         )
-
+        
+    def __repr__(self):
+        return f"WaveUNet_d{self.depth}_f{self.base_filters}"
+    
     def forward(self, x: torch.Tensor):
         skips = []
         o = x
@@ -142,10 +147,10 @@ class WaveUNet(L.LightningModule):
         n_ref = y["noise"]
         
         # Losses
-        si_noise = self.si_snr(v_hat, v_ref).mean()
-        si_voice = self.si_snr(n_hat, n_ref).mean()
+        si_voice = self.si_snr(v_hat, v_ref).mean()
+        # si_noise = self.si_snr(n_hat, n_ref).mean()
         
-        loss_si = -(si_voice + si_noise) / 2.0
+        loss_si = -si_voice  # -si_snr to minimize
         
         mix_rec = v_hat + n_hat
         loss_mix = F.mse_loss(mix_rec, x)
@@ -154,7 +159,9 @@ class WaveUNet(L.LightningModule):
 
         try:
             pesq = self.pesq(v_hat.unsqueeze(1), v_ref.unsqueeze(1))
-            self.log(f"{stage}_pesq", pesq.mean(), prog_bar=True)
+            stoi = self.stoi(v_hat.unsqueeze(1), v_ref.unsqueeze(1))
+            self.log(f"{stage}_pesq", pesq.mean(), on_step=False, on_epoch=True, prog_bar=True)
+            self.log(f"{stage}_stoi", stoi.mean(), on_step=False, on_epoch=True, prog_bar=True)
             
         except Exception:
             # PESQ can fail on silent segments
@@ -179,5 +186,6 @@ class WaveUNet(L.LightningModule):
 if __name__ == "__main__":
     model = WaveUNet()
     x = torch.randn(2, 1, 8000)
+    print(model.__repr__())
     est_voice, est_noise = model(x)
     print(est_voice.shape, est_noise.shape)
