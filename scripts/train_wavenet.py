@@ -15,6 +15,10 @@ args = parser.parse_args()
 # Run in another terminal: tensorboard --logdir lightning_logs --port 6006
 # logger = TensorBoardLogger("lightning_logs", name="tb_run")
 logger = WandbLogger(project="audiosep", name="wave_unet_run", log_model="all")
+if not os.path.exists("data"):
+    logger.download_artifact(
+        "simon-yannis/audiosep/data:latest", save_dir="data", artifact_type="raw_data"
+    )
 
 device = "mps" if torch.backends.mps.is_available() else "cpu"
 # Adjust max_len based on device capabilities

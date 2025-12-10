@@ -3,8 +3,6 @@ import os
 import torch
 from torch.utils.data import Dataset
 from audiosep.io import load_audio_tensor
-RESAMPLE_RATE = 8000
-
 
 class WaveDataset(Dataset):
     def __init__(self, root_dir, max_len=None):
@@ -35,16 +33,9 @@ class WaveDataset(Dataset):
         noise_path = os.path.join(folder_path, "noise.wav")
 
         # Load audios
-        if torch.mps.is_available():
-            mix, sample_rate   = load_audio_tensor(mix_path, target_sample_rate=RESAMPLE_RATE)
-            # print(f"Loaded mix from {mix_path} with sample rate {sample_rate}")
-            # print(f"Mix shape: {mix.shape}")
-            voice, _ = load_audio_tensor(voice_path, target_sample_rate=RESAMPLE_RATE)
-            noise, _ = load_audio_tensor(noise_path, target_sample_rate=RESAMPLE_RATE)
-        else:
-            mix, sample_rate   = load_audio_tensor(mix_path)
-            voice, _ = load_audio_tensor(voice_path)
-            noise, _ = load_audio_tensor(noise_path)
+        mix, sample_rate   = load_audio_tensor(mix_path)
+        voice, _ = load_audio_tensor(voice_path)
+        noise, _ = load_audio_tensor(noise_path)
         
         # Random crop if needed
         if self.max_len is not None and mix.shape[-1] > self.max_len:
