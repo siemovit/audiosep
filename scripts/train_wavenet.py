@@ -37,7 +37,7 @@ os.makedirs(ckpt_dir, exist_ok=True)
 print(f"Saving checkpoints to: {ckpt_dir}")
 
 # Model
-model = WaveUNet(in_channels=1, out_channels=2, depth=5, base_filters=24, max_filters=512)
+model = WaveUNet(in_channels=1, out_channels=2, depth=5, base_filters=24)
 
 # Trainer
 callback = ModelCheckpoint(every_n_epochs=5, dirpath=ckpt_dir, filename="{epoch:02d}")

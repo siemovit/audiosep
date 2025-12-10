@@ -8,6 +8,7 @@ src/audiosep/models/__pycache__/
 src/audiosep.egg-info/
 lightning_logs/
 wandb/
+artifacts/
 
 .DS_Store
 *.pyc
