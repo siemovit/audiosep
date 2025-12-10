@@ -6,7 +6,7 @@ import torch
 from typing import List, Tuple, Dict
 
 class WaveDatamodule(L.LightningDataModule):
-    def __init__(self, train_data_dir: str, test_data_dir: str = None, batch_size: int = 16, num_workers: int = 7, val_split: float = 0.2, seed: int = 42, max_len: int = 32000):
+    def __init__(self, train_data_dir: str, test_data_dir: str = None, batch_size: int = 16, num_workers: int = 7, val_split: float = 0.2, seed: int = 42, max_len: int = None):
         super().__init__()
         # data directories
         self.train_data_dir = train_data_dir
@@ -66,24 +66,4 @@ class WaveDatamodule(L.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers)
-
-    # def _pad_collate(self, batch):
-    #     mixes = [b[0] for b in batch]
-    #     voices = [b[1]['voice'] for b in batch]
-    #     noises = [b[1]['noise'] for b in batch]
-    #     max_t = max(m.shape[-1] for m in mixes)
-    #     def pad_list(arrs):
-    #         outs = []
-    #         for a in arrs:
-    #             pad = max_t - a.shape[-1]
-    #             if pad > 0:
-    #                 a = F.pad(a, (0, pad))
-    #             outs.append(a)
-    #         return torch.stack(outs, dim=0)
-
-    #     mixes = pad_list(mixes)
-    #     voices = pad_list(voices)
-    #     noises = pad_list(noises)
-    #     targets = {'voice': voices, 'noise': noises}
-    #     return mixes, targets
 
