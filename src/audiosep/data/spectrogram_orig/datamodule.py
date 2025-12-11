@@ -3,7 +3,8 @@ import os
 import lightning as L
 from torch.utils.data import DataLoader
 
-from audiosep.data.spectrogram_orig.dataset import OriginalVoiceNoiseDataset
+from audiosep.data.spectrogram_orig.spectogram_dataset import OriginalVoiceNoiseDataset
+from audiosep.data.spectrogram_orig.waveform_dataset import WaveFormVoiceNoiseDataset
 
 
 class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
@@ -27,7 +28,8 @@ class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
         self.val_split = float(val_split)
         self.seed = int(seed)
         self.train_dataset = OriginalVoiceNoiseDataset(root_dir=self.train_data_dir)
-        self.test_dataset = OriginalVoiceNoiseDataset(root_dir=self.test_data_dir)
+        self.val_dataset = OriginalVoiceNoiseDataset(root_dir=self.test_data_dir)
+        self.test_dataset = WaveFormVoiceNoiseDataset(root_dir=self.test_data_dir)
 
     def setup(self, stage=None):
         # list example folders and split deterministically
@@ -47,7 +49,7 @@ class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
                 for d in os.listdir(self.test_data_dir)
                 if os.path.isdir(os.path.join(self.test_data_dir, d))
             )
-            self.test_dataset.audio_sample_dirs = all_folders_test
+            self.val_dataset.audio_sample_dirs = all_folders_test
 
     def train_dataloader(self):
         return DataLoader(
@@ -59,11 +61,16 @@ class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
 
     def val_dataloader(self):
         return DataLoader(
-            self.test_dataset,
+            self.val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
         )
 
     def test_dataloader(self):
-        return self.val_dataloader()
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )

@@ -1,9 +1,33 @@
 """6 -level U-Net for spectrogram masking (voice only)."""
 
+from typing import Mapping, Union, cast, Any, override
+
+import librosa
+import lightning as L
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import lightning as L
+from lightning.pytorch.loggers.wandb import WandbLogger
+from torchmetrics.audio import (
+    ScaleInvariantSignalDistortionRatio,
+    SignalDistortionRatio,
+    SignalNoiseRatio,
+)
+from torchmetrics.audio.pesq import PerceptualEvaluationSpeechQuality
+from torchmetrics.audio.stoi import ShortTimeObjectiveIntelligibility
+import wandb
+
+from audiosep.data.spectrogram_orig.spectogram_dataset import (
+    OriginalVoiceNoiseDatasetBatch,
+)
+from audiosep.data.spectrogram_orig.spectrogram import (
+    FS,
+    HOP_LENGTH,
+    N_FFT,
+    wav_to_mag_phase,
+)
+from audiosep.data.spectrogram_orig.waveform_dataset import WaveFormVoiceNoiseBatch
 
 
 class SpectroUNetOriginal(L.LightningModule):
@@ -11,6 +35,13 @@ class SpectroUNetOriginal(L.LightningModule):
 
     def __init__(self):
         super().__init__()
+        self.save_hyperparameters()
+
+        self.metric_sisdr = ScaleInvariantSignalDistortionRatio()
+        self.metric_sdr = SignalDistortionRatio()
+        self.metric_snr = SignalNoiseRatio()
+        self.metric_pesq = PerceptualEvaluationSpeechQuality(fs=FS, mode="nb")
+        self.metric_stoi = ShortTimeObjectiveIntelligibility(fs=FS)
 
         # Define the network components
         self.conv1 = nn.Sequential(
@@ -80,6 +111,7 @@ class SpectroUNetOriginal(L.LightningModule):
         # Define the criterion and optimizer
         self.crit = nn.L1Loss()
 
+    @override
     def forward(self, mix):
         """
         Generate the mask for the given mixture audio spectrogram
@@ -114,23 +146,153 @@ class SpectroUNetOriginal(L.LightningModule):
         deconv6_out = self.deconv6(
             torch.cat([deconv5_out, conv1_out], 1), output_size=mix.size()
         )
-        out = F.sigmoid(deconv6_out)
+        out = torch.sigmoid(deconv6_out)
         return out
 
-    def _shared_step(self, batch):
+    def _shared_step(self, batch: OriginalVoiceNoiseDatasetBatch, stage: str):
         mix, voc = batch
         msk = self(mix)
         loss = self.crit(msk * mix, voc)
+        self.log(f"{stage}_loss", loss, prog_bar=True, on_step=True, on_epoch=True)
+
         return loss
 
     def training_step(self, batch, _):
-        return self._shared_step(batch)
+        return self._shared_step(batch, "train")
 
     def validation_step(self, batch, _):
-        self._shared_step(batch)
+        self._shared_step(batch, "val")
 
-    def test_step(self, batch, _):
-        self._shared_step(batch)
+    def test_step(
+        self, batch: WaveFormVoiceNoiseBatch, batch_idx: int
+    ) -> Mapping[str, Any]:
+        mix_spec_mag, phase = wav_to_mag_phase(batch.mix.squeeze().cpu().numpy())
+        voice_spec_waveform = batch.voice.squeeze()
+
+        spec_sum: Union[np.ndarray, None] = None
+        window = 128
+        T = mix_spec_mag.shape[-1]
+        if T == 0:
+            return {}
+            # 1. Normalize input (Critical: model expects 0-1 range)
+        norm_factor = mix_spec_mag.max()
+        if norm_factor > 0:
+            mix_spec_mag = mix_spec_mag / norm_factor
+
+        # Pad time dimension so we always have full 128-frame segments
+        pad_width = 0
+        if T < window:
+            pad_width = window - T
+        elif T % window != 0:
+            pad_width = window - (T % window)
+
+        if pad_width > 0:
+            # mix_spec shape: (freq, time), pad only the time dim
+            mix_spec_mag = F.pad(mix_spec_mag, (0, pad_width))
+        for i in range(mix_spec_mag.shape[-1] // 128):
+            # Get the fixed size of segment
+            seg = mix_spec_mag[1:, i * 128 : i * 128 + 128, np.newaxis]
+            seg = np.asarray(seg, dtype=np.float32)
+            seg = torch.from_numpy(seg).permute(2, 0, 1)
+            seg = torch.unsqueeze(seg, 0)
+            seg = seg.to(self.device)
+
+            # generate mask
+            msk = self.forward(seg)
+
+            vocal_ = seg * msk
+
+            # accumulate the segment until the whole song is finished
+            vocal_ = vocal_.permute(0, 2, 3, 1).cpu().numpy()[0, :, :, 0]
+            vocal_ = np.vstack((np.zeros((128)), vocal_))
+            spec_sum = (
+                vocal_ if spec_sum is None else np.concatenate((spec_sum, vocal_), -1)
+            )
+        if spec_sum is None:
+            return {}
+        length = min(phase.shape[-1], spec_sum.shape[-1])
+        mag = spec_sum[:, :length]
+        phase = phase[:, :length]
+        spectrogram = mag * phase
+        spectrogram *= norm_factor.item()
+        predicted_voice = librosa.istft(
+            spectrogram, win_length=N_FFT, hop_length=HOP_LENGTH
+        )
+        pred = torch.from_numpy(predicted_voice).float().to(self.device)
+        target = voice_spec_waveform
+
+        # Match lengths
+        min_len = min(pred.shape[-1], target.shape[-1])
+        pred = pred[..., :min_len]
+        target = target[..., :min_len]
+
+        # ----- Metrics -----
+        sisdr = self.metric_sisdr(pred, target)
+        sdr = self.metric_sdr(pred, target)
+        snr = self.metric_snr(pred, target)
+        pesq = self.metric_pesq(pred, target)
+        stoi = self.metric_stoi(pred, target)
+
+        # Log metrics
+        self.log("test/si_sdr", sisdr, prog_bar=True, on_step=True, on_epoch=True)
+        self.log("test/sdr", sdr, prog_bar=True, on_step=True, on_epoch=True)
+        self.log("test/snr", snr, on_step=True, on_epoch=True)
+        self.log("test/pesq", pesq, on_step=True, on_epoch=True)
+        self.log("test/stoi", stoi, on_step=True, on_epoch=True)
+        return {
+            "pred": pred,
+            "mix": batch.mix.squeeze(),
+            "voice": target,
+            "noise": batch.noise.squeeze(),
+            "idx": batch_idx,
+            "sisdr": sisdr,
+            "snr": snr,
+            "mix_filename": batch.mix_filename,
+        }
+
+    def on_test_start(self):
+        self.table = wandb.Table(
+            columns=[
+                "idx",
+                "predicted_voice",
+                "target_voice",
+                "noise",
+                "mix",
+                "sisdr",
+                "snr",
+                "mix_filename",
+            ]
+        )
+
+    @override
+    def on_test_batch_end(
+        self,
+        outputs,
+        batch,
+        batch_idx,
+        dataloader_idx=0,
+    ):
+        if not isinstance(outputs, dict):
+            return
+
+        pred_np = outputs["pred"].cpu().numpy().astype("float32")
+        voice_np = outputs["voice"].cpu().numpy().astype("float32")
+        noise_np = outputs["noise"].cpu().numpy().astype("float32")
+        mix_np = outputs["mix"].cpu().numpy().astype("float32")
+        self.table.add_data(
+            batch_idx,
+            wandb.Audio(pred_np, sample_rate=FS),
+            wandb.Audio(voice_np, sample_rate=FS),
+            wandb.Audio(noise_np, sample_rate=FS),
+            wandb.Audio(mix_np, sample_rate=FS),
+            outputs["sisdr"].item(),
+            outputs["snr"].item(),
+            outputs["mix_filename"][0],
+        )
+
+    def on_test_end(self):
+        logger = cast(WandbLogger, self.logger)
+        logger.experiment.log({"test_table": self.table})
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=1e-4)

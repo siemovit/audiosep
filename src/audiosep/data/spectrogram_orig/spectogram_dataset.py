@@ -1,12 +1,19 @@
 # src/dataset.py
 import os
 import random
+from typing import NamedTuple
 
+import librosa
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 
 from audiosep.data.spectrogram_orig.spectrogram import wav_to_mag_phase
+
+
+class OriginalVoiceNoiseDatasetBatch(NamedTuple):
+    mix_spect: torch.Tensor
+    voice_spect: torch.Tensor
 
 
 class OriginalVoiceNoiseDataset(Dataset):
@@ -36,7 +43,7 @@ class OriginalVoiceNoiseDataset(Dataset):
     def __getitem__(self, idx):
         return self._load_item(idx)
 
-    def _load_item(self, idx):
+    def _load_item(self, idx) -> OriginalVoiceNoiseDatasetBatch:
         folder = self.audio_sample_dirs[idx]
         folder_path = os.path.join(self.root_dir, folder)
 
@@ -60,12 +67,28 @@ class OriginalVoiceNoiseDataset(Dataset):
             # To tensor
 
             # --- calcul des spectrogrammes sans normalisation ---
-            mix, mix_phase = wav_to_mag_phase(mix_path)
-            voc, voc_phase = wav_to_mag_phase(voice_path)
+            mix_waveform, _ = librosa.load(mix_path, sr=None, mono=True)
+            voc_waveform, _ = librosa.load(voice_path, sr=None, mono=True)
+            mix, mix_phase = wav_to_mag_phase(mix_waveform)
+            voc, voc_phase = wav_to_mag_phase(voc_waveform)
+            time = mix.shape[-1]
+            window = 128
 
-            start = random.randint(0, mix.shape[-1] - 128 - 1)
-            mix = mix[1:, start : start + 128, np.newaxis]
-            voc = voc[1:, start : start + 128, np.newaxis]
+            # Pad if too short
+            if time < window:
+                pad_width = window - time
+                mix = torch.nn.functional.pad(mix, (0, pad_width))
+                voc = torch.nn.functional.pad(voc, (0, pad_width))
+                time = window  # now exactly 128
+
+            # Now T >= window, so this is safe
+            max_start = time - window
+            start = random.randint(0, max_start)  # inclusive
+
+            # Same cropping in all cases
+            mix = mix[1:, start : start + window, np.newaxis]
+            voc = voc[1:, start : start + window, np.newaxis]
+
             mix = np.asarray(mix, dtype=np.float32)
             voc = np.asarray(voc, dtype=np.float32)
             scale = mix.max()
@@ -83,4 +106,4 @@ class OriginalVoiceNoiseDataset(Dataset):
             torch.save(mix_phase, mix_cache.replace("_mix.pt", "_mix_phase.pt"))
             torch.save(voc_phase, voice_cache.replace("_voice.pt", "_voice_phase.pt"))
 
-        return mix, {"voice": voc}
+        return OriginalVoiceNoiseDatasetBatch(mix_spect=mix, voice_spect=voc)
