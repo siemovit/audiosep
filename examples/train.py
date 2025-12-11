@@ -9,10 +9,14 @@ from audiosep.models import SpectroUNetSkip2D
 
 # Run in another terminal: tensorboard --logdir lightning_logs --port 6006
 # logger = TensorBoardLogger("lightning_logs", name="tb_run")
-logger = WandbLogger(project="audiosep", name="spectro_UNetSkip2D_run", log_model="all")
-logger.download_artifact(
-    "simon-yannis/audiosep/data:latest", save_dir="./data", artifact_type="raw_data"
+wandb_logger = WandbLogger(
+    project="audiosep", name="spectro_UNetSkip2D_run", log_model="all"
 )
+if not os.path.exists("./data"):
+    wandb_logger.download_artifact(
+        "simon-yannis/audiosep/data:latest", save_dir="./data", artifact_type="raw_data"
+    )
+
 dm = VoiceNoiseDatamodule(
     train_data_dir="data/train",
     test_data_dir="data/test",
@@ -21,23 +25,18 @@ dm = VoiceNoiseDatamodule(
     seed=42,
 )
 
-# W&B checkpoint dir
-run = logger.experiment  # should be a wandb Run
-run_dir = getattr(run, "dir", None) or getattr(run, "run_dir", None)
-ckpt_dir = os.path.join(run_dir, "checkpoints")
-os.makedirs(ckpt_dir, exist_ok=True)
-print(f"Saving checkpoints to: {ckpt_dir}")
 
 # Model
-model = SpectroUNetSkip2D(in_channels=1, out_channels=2)
+model = SpectroUNetSkip2D()
 
 # Trainer
-callback = ModelCheckpoint(every_n_epochs=5, dirpath=ckpt_dir, filename="{epoch:02d}")
+callback = ModelCheckpoint(every_n_epochs=5, filename="{epoch:02d}")
+wandb_logger.watch(model, log="all")
 # Logging every 10 steps to ensure training logs appear even when epoch has fewer batches
 trainer = Trainer(
     max_epochs=100,
     accelerator="auto",
-    logger=logger,
+    logger=wandb_logger,
     callbacks=[callback],
     log_every_n_steps=10,
 )
