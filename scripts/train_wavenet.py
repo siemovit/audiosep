@@ -15,6 +15,7 @@ parser.add_argument('--max_epochs', type=int, default=50, help='Number of traini
 parser.add_argument('--exp_name', type=str, default="", help='Additional experiment name info')
 parser.add_argument('--depth', type=int, default=5, help='Depth of the WaveUNet model')
 parser.add_argument('--base_filters', type=int, default=24, help='Number of base filters in WaveUNet model')
+parser.add_argument('--num_workers', type=int, default=0, help='Number of DataLoader workers')
 
 args = parser.parse_args()
 
@@ -39,7 +40,7 @@ dm = WaveDatamodule(
     train_data_dir="data/train",
     test_data_dir="data/test",
     batch_size=args.batch_size,
-    num_workers=0,
+    num_workers=args.num_workers,
     seed=42,
     max_len=max_len,
 )
