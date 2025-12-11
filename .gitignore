@@ -14,3 +14,5 @@ wandb/
 __pycache__/*
 **/*/__pycache__/*
 __pycache__/
+audiosep/
+artifacts/
