@@ -1,9 +1,6 @@
 data/*
 .venv/
-src/audiosep/__pycache__/
-src/audiosep/data/__pycache__/
-src/audiosep/data/spectrogram/__pycache__/
-src/audiosep/models/__pycache__/
+
 
 src/audiosep.egg-info/
 lightning_logs/
@@ -14,5 +11,4 @@ wandb/
 __pycache__/*
 **/*/__pycache__/*
 __pycache__/
-audiosep/
 artifacts/
