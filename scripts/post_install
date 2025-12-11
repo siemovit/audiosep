@@ -1,8 +1,0 @@
-sudo apt update
-yes Y | sudo apt install python3-pip 
-git clone https://siemovit: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@github.com/siemovit/audiosep.git
-cd audiosep
-python3 -m pip install --upgrade pip
-python3 -m pip install .
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
-source ~/.bashrc
