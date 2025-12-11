@@ -27,7 +27,7 @@ from audiosep.data.spectrogram_orig.spectrogram import (
     N_FFT,
     wav_to_mag_phase,
 )
-from audiosep.data.spectrogram_orig.waveform_dataset import WaveFormVoiceNoiseBatch
+from audiosep.data.waveform_dataset import WaveFormVoiceNoiseBatch
 
 
 class SpectroUNetOriginal(L.LightningModule):
@@ -163,11 +163,12 @@ class SpectroUNetOriginal(L.LightningModule):
     def validation_step(self, batch, _):
         self._shared_step(batch, "val")
 
-    def test_step(
-        self, batch: WaveFormVoiceNoiseBatch, batch_idx: int
-    ) -> Mapping[str, Any]:
-        mix_spec_mag, phase = wav_to_mag_phase(batch.mix.squeeze().cpu().numpy())
-        voice_spec_waveform = batch.voice.squeeze()
+    def test_step(self, batch: WaveFormVoiceNoiseBatch, batch_idx: int):
+        if batch.mix.size(0) != 1:
+            raise ValueError("Batch size must be 1 for test step.")
+        mix_waveform = batch.mix.squeeze()
+        mix_spec_mag, phase = wav_to_mag_phase(mix_waveform.cpu().numpy())
+        voice_waveform = batch.voice.squeeze()
 
         spec_sum: Union[np.ndarray, None] = None
         window = 128
@@ -218,51 +219,56 @@ class SpectroUNetOriginal(L.LightningModule):
         predicted_voice = librosa.istft(
             spectrogram, win_length=N_FFT, hop_length=HOP_LENGTH
         )
-        pred = torch.from_numpy(predicted_voice).float().to(self.device)
-        target = voice_spec_waveform
+        pred_voice = torch.from_numpy(predicted_voice).float().to(self.device)
 
         # Match lengths
-        min_len = min(pred.shape[-1], target.shape[-1])
-        pred = pred[..., :min_len]
-        target = target[..., :min_len]
-
+        min_len = min(pred_voice.shape[-1], voice_waveform.shape[-1])
+        pred_voice = pred_voice[..., :min_len]
+        target = voice_waveform[..., :min_len]
+        control_mix = mix_waveform[..., :min_len]
         # ----- Metrics -----
-        sisdr = self.metric_sisdr(pred, target)
-        sdr = self.metric_sdr(pred, target)
-        snr = self.metric_snr(pred, target)
-        pesq = self.metric_pesq(pred, target)
-        stoi = self.metric_stoi(pred, target)
-
+        sisdr = self.metric_sisdr(pred_voice, target)
+        sdr = self.metric_sdr(pred_voice, target)
+        snr = self.metric_snr(pred_voice, target)
+        pesq = self.metric_pesq(pred_voice, target)
+        stoi = self.metric_stoi(pred_voice, target)
+        snr_control = self.metric_snr(control_mix, target)
         # Log metrics
-        self.log("test/si_sdr", sisdr, prog_bar=True, on_step=True, on_epoch=True)
-        self.log("test/sdr", sdr, prog_bar=True, on_step=True, on_epoch=True)
-        self.log("test/snr", snr, on_step=True, on_epoch=True)
-        self.log("test/pesq", pesq, on_step=True, on_epoch=True)
-        self.log("test/stoi", stoi, on_step=True, on_epoch=True)
+        self.log(
+            "test/si_sdr",
+            sisdr,
+            prog_bar=True,
+            on_step=True,
+            on_epoch=True,
+            batch_size=1,
+        )
+        self.log(
+            "test/sdr",
+            sdr,
+            prog_bar=True,
+            on_step=True,
+            on_epoch=True,
+            batch_size=1,
+        )
+        self.log("test/snr", snr, on_step=True, on_epoch=True, batch_size=1)
+        self.log("test/pesq", pesq, on_step=True, on_epoch=True, batch_size=1)
+        self.log("test/stoi", stoi, on_step=True, on_epoch=True, batch_size=1)
+        self.log("test/control_snr", snr_control, on_step=True, batch_size=1)
+
         return {
-            "pred": pred,
-            "mix": batch.mix.squeeze(),
+            "pred": pred_voice,
+            "mix": mix_waveform,
             "voice": target,
             "noise": batch.noise.squeeze(),
             "idx": batch_idx,
             "sisdr": sisdr,
             "snr": snr,
+            "control_snr": snr_control,
             "mix_filename": batch.mix_filename,
         }
 
     def on_test_start(self):
-        self.table = wandb.Table(
-            columns=[
-                "idx",
-                "predicted_voice",
-                "target_voice",
-                "noise",
-                "mix",
-                "sisdr",
-                "snr",
-                "mix_filename",
-            ]
-        )
+        self.table_data: list[list[Any]] = []
 
     @override
     def on_test_batch_end(
@@ -279,20 +285,37 @@ class SpectroUNetOriginal(L.LightningModule):
         voice_np = outputs["voice"].cpu().numpy().astype("float32")
         noise_np = outputs["noise"].cpu().numpy().astype("float32")
         mix_np = outputs["mix"].cpu().numpy().astype("float32")
-        self.table.add_data(
-            batch_idx,
-            wandb.Audio(pred_np, sample_rate=FS),
-            wandb.Audio(voice_np, sample_rate=FS),
-            wandb.Audio(noise_np, sample_rate=FS),
-            wandb.Audio(mix_np, sample_rate=FS),
-            outputs["sisdr"].item(),
-            outputs["snr"].item(),
-            outputs["mix_filename"][0],
+        self.table_data.append(
+            [
+                batch_idx,
+                wandb.Audio(pred_np, sample_rate=FS),
+                wandb.Audio(voice_np, sample_rate=FS),
+                wandb.Audio(noise_np, sample_rate=FS),
+                wandb.Audio(mix_np, sample_rate=FS),
+                outputs["sisdr"].item(),
+                outputs["snr"].item(),
+                outputs["control_snr"].item(),
+                outputs["mix_filename"][0],
+            ]
         )
 
     def on_test_end(self):
         logger = cast(WandbLogger, self.logger)
-        logger.experiment.log({"test_table": self.table})
+        logger.log_table(
+            "test_table",
+            columns=[
+                "idx",
+                "predicted_voice",
+                "target_voice",
+                "noise",
+                "mix",
+                "sisdr",
+                "snr",
+                "control_snr",
+                "mix_filename",
+            ],
+            data=self.table_data,
+        )
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=1e-4)

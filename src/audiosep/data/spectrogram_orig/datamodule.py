@@ -4,7 +4,7 @@ import lightning as L
 from torch.utils.data import DataLoader
 
 from audiosep.data.spectrogram_orig.spectogram_dataset import OriginalVoiceNoiseDataset
-from audiosep.data.spectrogram_orig.waveform_dataset import WaveFormVoiceNoiseDataset
+from audiosep.data.waveform_dataset import WaveFormVoiceNoiseDataset
 
 
 class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
@@ -70,7 +70,7 @@ class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(
             self.test_dataset,
-            batch_size=self.batch_size,
+            batch_size=1,
             shuffle=False,
             num_workers=self.num_workers,
         )
