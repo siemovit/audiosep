@@ -2,13 +2,29 @@ import os
 from pathlib import Path
 from typing import cast
 
-from lightning.pytorch.cli import LightningCLI
-
+from lightning import LightningModule, Trainer
+from lightning.pytorch.cli import LightningCLI, SaveConfigCallback
+from lightning.pytorch.loggers import WandbLogger
 import audiosep.data  # pylint: disable=W0611 # noqa: F401 used by the CLI to find datamodules
 import audiosep.models  # pylint: disable=W0611 # noqa: F401 used by the CLI to find models
 import wandb
 
 # simple demo classes for your convenience
+
+
+class CustomSaveConfigCallback(SaveConfigCallback):
+    """# from https://github.com/Lightning-AI/pytorch-lightning/issues/19728"""
+
+    # Saves full training configuration
+    def save_config(
+        self, trainer: Trainer, pl_module: LightningModule, stage: str
+    ) -> None:
+        for logger in trainer.loggers:
+            if issubclass(type(logger), WandbLogger):
+                cast(WandbLogger, logger).watch(pl_module, log="all")
+                config = self.parser.dump(self.config, skip_none=False)
+                logger.log_hyperparams({"config": config})
+        return super().save_config(trainer, pl_module, stage)
 
 
 class MyLightningCLI(LightningCLI):
@@ -34,7 +50,10 @@ class MyLightningCLI(LightningCLI):
 
 
 def cli_main():
-    MyLightningCLI(save_config_callback=None)
+    MyLightningCLI(
+        save_config_callback=CustomSaveConfigCallback,
+        save_config_kwargs={"overwrite": True},
+    )
     wandb.finish()  # really important
 
 
