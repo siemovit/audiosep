@@ -1,17 +1,29 @@
-import lightning as L
-from torch.utils.data import DataLoader
-from .dataset import VoiceNoiseDataset
 import os
+from typing import Dict, List, Tuple
+
+import lightning as L
 import torch
-from typing import List, Tuple, Dict
+from torch.utils.data import DataLoader
+
+from audiosep.data.spectrogram.dataset import VoiceNoiseDataset
+from audiosep.data.waveform_dataset import WaveFormVoiceNoiseDataset
+
 
 class VoiceNoiseDatamodule(L.LightningDataModule):
-    def __init__(self, train_data_dir: str, test_data_dir: str = None, batch_size: int = 16, num_workers: int = 7, val_split: float = 0.2, seed: int = 42):
+    def __init__(
+        self,
+        train_data_dir: str,
+        test_data_dir: str,
+        batch_size: int = 16,
+        num_workers: int = 7,
+        val_split: float = 0.2,
+        seed: int = 42,
+    ):
         super().__init__()
         # data directories
         self.train_data_dir = train_data_dir
-        self.test_data_dir = test_data_dir 
-        
+        self.test_data_dir = test_data_dir
+
         # data loading params
         self.batch_size = batch_size
         self.num_workers = num_workers
@@ -19,29 +31,26 @@ class VoiceNoiseDatamodule(L.LightningDataModule):
         self.seed = int(seed)
 
         # placeholders set in setup
-        self.train_dataset = None
-        self.test_dataset = None
 
-    def setup(self, stage=None):
-        # list example folders and split deterministically
-        if stage == 'fit':
-            all_folders_train = sorted(
-                d for d in os.listdir(self.train_data_dir)
-                if os.path.isdir(os.path.join(self.train_data_dir, d))
-            )
-            
-            # create train dataset
-            self.train_dataset = VoiceNoiseDataset(root_dir=self.train_data_dir)
-            self.train_dataset.example_dirs = all_folders_train
-            
-        if self.test_data_dir is not None:
-            all_folders_test = sorted(
-                d for d in os.listdir(self.test_data_dir)
-                if os.path.isdir(os.path.join(self.test_data_dir, d))
-            )
-            self.test_dataset = VoiceNoiseDataset(root_dir=self.test_data_dir)
-            self.test_dataset.example_dirs = all_folders_test
-        
+        all_folders_train = sorted(
+            d
+            for d in os.listdir(self.train_data_dir)
+            if os.path.isdir(os.path.join(self.train_data_dir, d))
+        )
+
+        # create train dataset
+        self.train_dataset = VoiceNoiseDataset(root_dir=self.train_data_dir)
+        self.train_dataset.example_dirs = all_folders_train
+
+        all_folders_test = sorted(
+            d
+            for d in os.listdir(self.test_data_dir)
+            if os.path.isdir(os.path.join(self.test_data_dir, d))
+        )
+        self.val_dataset = VoiceNoiseDataset(root_dir=self.test_data_dir)
+        self.val_dataset.example_dirs = all_folders_test
+        self.test_dataset = WaveFormVoiceNoiseDataset(root_dir=self.test_data_dir)
+
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
@@ -50,22 +59,22 @@ class VoiceNoiseDatamodule(L.LightningDataModule):
             num_workers=self.num_workers,
             collate_fn=self._pad_collate,
         )
+
     def val_dataloader(self):
         return DataLoader(
-            self.test_dataset,
+            self.val_dataset,
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
             collate_fn=self._pad_collate,
         )
-        
+
     def test_dataloader(self):
         return DataLoader(
             self.test_dataset,
-            batch_size=self.batch_size,
+            batch_size=1,  # really important
             shuffle=False,
             num_workers=self.num_workers,
-            collate_fn=self._pad_collate,
         )
 
     def _pad_collate(self, batch: List[Tuple[torch.Tensor, Dict[str, torch.Tensor]]]):

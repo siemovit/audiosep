@@ -1,6 +1,6 @@
 """6 -level U-Net for spectrogram masking (voice only)."""
 
-from typing import Mapping, Union, cast, Any, override
+from typing import Union, cast, Any, override
 
 import librosa
 import lightning as L
@@ -157,12 +157,15 @@ class SpectroUNetOriginal(L.LightningModule):
 
         return loss
 
+    @override
     def training_step(self, batch, _):
         return self._shared_step(batch, "train")
 
+    @override
     def validation_step(self, batch, _):
         self._shared_step(batch, "val")
 
+    @override
     def test_step(self, batch: WaveFormVoiceNoiseBatch, batch_idx: int):
         if batch.mix.size(0) != 1:
             raise ValueError("Batch size must be 1 for test step.")
@@ -267,6 +270,7 @@ class SpectroUNetOriginal(L.LightningModule):
             "mix_filename": batch.mix_filename,
         }
 
+    @override
     def on_test_start(self):
         self.table_data: list[list[Any]] = []
 
@@ -299,6 +303,7 @@ class SpectroUNetOriginal(L.LightningModule):
             ]
         )
 
+    @override
     def on_test_end(self):
         logger = cast(WandbLogger, self.logger)
         logger.log_table(
@@ -317,5 +322,6 @@ class SpectroUNetOriginal(L.LightningModule):
             data=self.table_data,
         )
 
+    @override
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=1e-3, weight_decay=1e-4)

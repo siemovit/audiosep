@@ -8,6 +8,8 @@ from audiosep.data.waveform_dataset import WaveFormVoiceNoiseDataset
 
 
 class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
+    """Simple datamodule for u-net on spectrograms"""
+
     def __init__(
         self,
         train_data_dir: str,
@@ -70,7 +72,7 @@ class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(
             self.test_dataset,
-            batch_size=1,
+            batch_size=1,  # really important
             shuffle=False,
             num_workers=self.num_workers,
         )
