@@ -7,7 +7,19 @@ from typing import List
 from torchmetrics.audio.snr import ScaleInvariantSignalNoiseRatio
 from torchmetrics.audio.pesq import PerceptualEvaluationSpeechQuality
 from torchmetrics.audio.stoi import ShortTimeObjectiveIntelligibility
-import torch
+
+from torchmetrics.audio import (
+    ScaleInvariantSignalDistortionRatio,
+    SignalDistortionRatio,
+    SignalNoiseRatio,
+)
+from lightning.pytorch.loggers.wandb import WandbLogger
+import wandb
+
+FS = 8000  # sampling frequency for metrics
+
+from audiosep.utils import center_crop
+from audiosep.data.wave.dataset import WaveDatasetBatch
 
 class ConvBlock(nn.Module):
     def __init__(self, in_ch: int, out_ch: int, kernel_size: int = 15, dropout: float = 0.0):
@@ -42,11 +54,10 @@ class Decoder(nn.Module):
     def __init__(self, in_ch: int, out_ch: int, kernel_size: int = 5, dropout: float = 0.0):
         super().__init__()
         self.conv = ConvBlock(in_ch, out_ch, kernel_size=kernel_size, dropout=dropout)
-        self.upsample = nn.Upsample(scale_factor=2, mode="linear", align_corners=True)
 
     def forward(self, x: torch.Tensor, skip: torch.Tensor):
         # upsample by factor 2
-        x_up = self.upsample(x)
+        x_up = F.interpolate(x, scale_factor=2, mode="linear", align_corners=True)
         x_cat = torch.cat([x_up, skip], dim=1)
         return self.conv(x_cat)
 class WaveUNet(L.LightningModule):
@@ -68,11 +79,19 @@ class WaveUNet(L.LightningModule):
         self.out_channels = int(out_channels)
         self.lambda_mix = 0.1  # weight for mix loss
         self.lr = lr
+        self.lambda_noise = 0.3  # weight for noise loss, voice quality is prioritized
 
         # metrics
+        # legacy/alternate metric instances (used by some helper calls)
         self.si_snr = ScaleInvariantSignalNoiseRatio()
-        self.pesq = PerceptualEvaluationSpeechQuality(fs=8000, mode="nb")
-        self.stoi = ShortTimeObjectiveIntelligibility(fs=8000, extended=False)
+        self.pesq = PerceptualEvaluationSpeechQuality(fs=FS, mode="nb")
+        self.stoi = ShortTimeObjectiveIntelligibility(fs=FS, extended=False)
+
+        self.metric_sisdr = ScaleInvariantSignalDistortionRatio()
+        self.metric_sdr = SignalDistortionRatio()
+        self.metric_snr = SignalNoiseRatio()
+        self.metric_pesq = PerceptualEvaluationSpeechQuality(fs=FS, mode="nb")
+        self.metric_stoi = ShortTimeObjectiveIntelligibility(fs=FS, extended=False)
 
         # ----------- Encoder -----------
         # encoder/decoder config
@@ -103,10 +122,7 @@ class WaveUNet(L.LightningModule):
             )
 
         # final conv: concat with input (base_filters + in_channels) -> out_channels
-        self.out = nn.Sequential(
-            nn.Conv1d(self.base_filters + self.in_channels, self.out_channels, kernel_size=1, stride=1),
-            nn.Tanh(),
-        )
+        self.out = nn.Conv1d(self.base_filters + self.in_channels, self.out_channels, kernel_size=1, stride=1)
         
     def __repr__(self):
         return f"WaveUNet_d{self.depth}_f{self.base_filters}"
@@ -128,49 +144,61 @@ class WaveUNet(L.LightningModule):
             o = self.decoder[i](o, skips[self.depth - i - 1])
 
         # 4) Final conv + concat with input
+        if o.shape[-1] != x.shape[-1]:
+            print("Warning: output length != input length:", o.shape[-1], x.shape[-1])
         o = torch.cat([o, x], dim=1)
         o = self.out(o)
 
         # split outputs (assume out_channels >= 2)
-        est_voice = o[:, 0:1, :]
-        est_noise = o[:, 1:2, :]
+        est_voice = o[:, 0:1, :] # shape (B, 1, T)
+        est_noise = o[:, 1:2, :] # shape (B, 1, T)
+        
         return est_voice, est_noise
 
     def _shared_step(self, batch, stage: str):
+        # Get data from batch
         x, y = batch
+        v_ref, n_ref  = y["voice"], y["noise"]
         
-        # Preds
-        v_hat, n_hat = self.forward(x)
+        # Model forward (B, 1, T_in)
+        v_hat, n_hat = self(x)
         
-        # Targets
-        v_ref = y["voice"]
-        n_ref = y["noise"]
+        # Crop to match target length
+        out_len = v_ref.shape[-1]
+        v_hat_c = center_crop(v_hat, out_len)
+        n_hat_c = center_crop(n_hat, out_len)
+        mix_c = center_crop(x, out_len)
         
-        # Losses
-        si_voice = self.si_snr(v_hat, v_ref).mean()
-        # si_noise = self.si_snr(n_hat, n_ref).mean()
-        
-        loss_si = -si_voice  # -si_snr to minimize
-        
-        mix_rec = v_hat + n_hat
-        loss_mix = F.mse_loss(mix_rec, x)
-        
-        loss = loss_si + self.lambda_mix * loss_mix
+        # ---- Baseline ---
+        # ---- Voice SI-SNR with silence gating ----
+        eps = 1e-8
+        v_energy = (v_ref.squeeze(1) ** 2).mean(dim=-1)      # (B,)
+        v_mask   = (v_energy > 1e-4).float()
 
-        try:
-            pesq = self.pesq(v_hat.unsqueeze(1), v_ref.unsqueeze(1))
-            stoi = self.stoi(v_hat.unsqueeze(1), v_ref.unsqueeze(1))
-            self.log(f"{stage}_pesq", pesq.mean(), on_step=False, on_epoch=True, prog_bar=True)
-            self.log(f"{stage}_stoi", stoi.mean(), on_step=False, on_epoch=True, prog_bar=True)
-            
-        except Exception:
-            # PESQ can fail on silent segments
-            pass
+        si_v = self.si_snr(v_hat_c.squeeze(1), v_ref.squeeze(1))  # (B,)
+        loss_v = - (si_v * v_mask).sum() / (v_mask.sum() + eps)
 
-        self.log(f"{stage}_loss", loss, prog_bar=True)
+        # ---- Noise SI-SNR (usually no need to gate since noise is present) ----
+        si_n = self.si_snr(n_hat_c.squeeze(1), n_ref.squeeze(1))  # (B,)
+        loss_n = - si_n.mean()
         
+        # Total SI-SNR loss (with weighting)
+        loss_si = loss_v + self.lambda_noise * loss_n
+
+        # ---- Mixture consistency ----
+        loss_mix = F.mse_loss(v_hat_c + n_hat_c, mix_c)
+        
+        # Total loss
+        loss = loss_si + self.lambda_mix * loss_mix      
+        
+        # logging
+        self.log(f"{stage}_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(f"{stage}_loss_si", loss_si, on_step=True)
+        self.log(f"{stage}_loss_mix", loss_mix, on_step=True)
+                
         return loss
-
+    
+    
     def training_step(self, batch, batch_idx):
         return self._shared_step(batch, "train")
 
@@ -178,7 +206,7 @@ class WaveUNet(L.LightningModule):
         return self._shared_step(batch, "val")
 
     def test_step(self, batch, batch_idx):
-        return self._shared_step(batch, "test")
+        pass
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
