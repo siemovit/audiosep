@@ -17,7 +17,7 @@ def main():
     parser.add_argument('--depth', type=int, default=5, help='Depth of the WaveUNet model')
     parser.add_argument('--base_filters', type=int, default=24, help='Number of base filters in WaveUNet model')
     parser.add_argument('--num_workers', type=int, default=0, help='Number of DataLoader workers')
-    parser.add_argument('--small_data', type=bool, default=True, action='store_true', help='Use small dataset for quick testing')
+    parser.add_argument('--small_data', default=False, action='store_true', help='Use small dataset for quick testing')
 
     args = parser.parse_args()
 
