@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import lightning as L
-from typing import List
+from typing import Any, List, cast
 
 from torchmetrics.audio.snr import ScaleInvariantSignalNoiseRatio
 from torchmetrics.audio.pesq import PerceptualEvaluationSpeechQuality
@@ -15,11 +15,18 @@ from torchmetrics.audio import (
 )
 from lightning.pytorch.loggers.wandb import WandbLogger
 import wandb
+from audiosep.data.waveform_dataset import WaveFormVoiceNoiseBatch
+
+import numpy as np
+import os
+import soundfile as sf
+from lightning.pytorch.utilities.rank_zero import rank_zero_warn
+
+
 
 FS = 8000  # sampling frequency for metrics
 
 from audiosep.utils import center_crop
-from audiosep.data.wave.dataset import WaveDatasetBatch
 
 class ConvBlock(nn.Module):
     def __init__(self, in_ch: int, out_ch: int, kernel_size: int = 15, dropout: float = 0.0):
@@ -70,7 +77,7 @@ class WaveUNet(L.LightningModule):
         - base_filters: channel step per layer
     """
 
-    def __init__(self, in_channels: int = 1, out_channels: int = 2, depth: int = 6, base_filters: int = 24, lr: float = 1e-3):
+    def __init__(self, in_channels: int = 1, out_channels: int = 2, depth: int = 5, base_filters: int = 24, lr: float = 1e-3):
         super().__init__()
         self.save_hyperparameters()
         self.depth = int(depth)
@@ -198,19 +205,187 @@ class WaveUNet(L.LightningModule):
                 
         return loss
     
-    
     def training_step(self, batch, batch_idx):
         return self._shared_step(batch, "train")
 
     def validation_step(self, batch, batch_idx):
         return self._shared_step(batch, "val")
+    
+    @torch.no_grad()
+    def infer_full_simple(self, mix, out_len, context):
+        """
+        mix: (1, T)
+        returns: voice_hat (1, T)
+        """
+                
+        if mix.dim() == 2:
+            mix = mix.unsqueeze(0)  # (1,1,T)
 
-    def test_step(self, batch, batch_idx):
-        pass
+        _, _, T = mix.shape
+        # in_len = out_len + 2 * context
+
+        voice_chunks = []
+        noise_chunks = []
+
+        t = 0
+        while t < T:
+            # input window
+            left = t - context
+            right = t + out_len + context
+
+            pad_l = max(0, -left)
+            pad_r = max(0, right - T)
+
+            left = max(0, left)
+            right = min(T, right)
+
+            x = mix[..., left:right]
+            if pad_l or pad_r:
+                x = F.pad(x, (pad_l, pad_r))
+             
+            # Inference
+            # print("x shape before inference", x.shape)
+            v_hat, n_hat = self(x)  # (1,1,in_len-ish)
+
+            # center crop
+            v_c = center_crop(v_hat, out_len)
+            n_c = center_crop(n_hat, out_len)
+            # print("v_c shape after center crop", v_c.shape)
+            # start = (v_hat.shape[-1] - out_len) // 2
+            # v_c = v_hat[..., start:start + out_len]
+
+            # trim last chunk
+            v_c = v_c[..., : min(out_len, T - t)]
+            n_c = n_c[..., : min(out_len, T - t)]
+
+            voice_chunks.append(v_c.squeeze(0))
+            noise_chunks.append(n_c.squeeze(0))
+            t += out_len
+            
+        # Concatenate chunks
+        return torch.cat(voice_chunks, dim=-1)[:, :T], torch.cat(noise_chunks, dim=-1)[:, :T]
+    
+    def test_step(self, batch:WaveFormVoiceNoiseBatch , batch_idx):
+        mix, v_ref, n_ref, mix_filename = batch  # full signals
+
+        # same as dataset windowing
+        context = 4096
+        out_len = 16384
+                
+        v_hat, _ = self.infer_full_simple(
+            mix,
+            out_len=out_len,
+            context=context,
+        )
+
+        # match lengths
+        L = min(v_hat.shape[-1], v_ref.shape[-1])
+        v_hat = v_hat[..., :L]
+        # n_hat = n_hat[..., :L]
+        v_ref = v_ref[..., :L]
+        # n_ref = n_ref[..., :L]
+        mix   = mix[..., :L]
+
+        # metrics (voice only, as in paper)
+        sisdr = self.metric_sisdr(v_hat, v_ref)
+        sdr = self.metric_sdr(v_hat, v_ref)
+        snr   = self.metric_snr(v_hat, v_ref)
+        pesq  = self.metric_pesq(v_hat, v_ref)
+        stoi  = self.metric_stoi(v_hat, v_ref)
+        snr_control = self.metric_snr(mix, v_ref)
+
+        # logging
+        self.log("test/si_sdr", sisdr, on_step=True, batch_size=1)
+        self.log("test/sdr", sdr, on_step=True, batch_size=1)
+        self.log("test/snr", snr, on_step=True, batch_size=1)
+        self.log("test/pesq", pesq, on_step=True, batch_size=1)
+        self.log("test/stoi", stoi, on_step=True, batch_size=1)
+        self.log("control_snr", snr_control, on_step=True, batch_size=1)
+        
+        return {
+            "pred": v_hat,
+            "mix": mix,
+            "voice": v_ref,
+            "noise": n_ref,
+            "idx": batch_idx,
+            "sisdr": sisdr, 
+            "snr": snr,
+            "control_snr": snr_control, 
+            "mix_filename": mix_filename,
+        }
+    
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters(), lr=self.lr)
 
+    def on_test_start(self):
+        self.table_data: list[list[Any]] = []
+        
+    def to_wandb_audio(self, x: torch.Tensor, sr: int, batch_idx: int = 0, debug=False, mix_filename=None) -> wandb.Audio:
+        # Return a sanitized 1D numpy array from a tensor
+        # x can be (1,T) or (1,1,T) or (T,)
+        x = x.detach().cpu()
+        if x.dim() == 3:   # (B,1,T)
+            x = x[0, 0]
+        elif x.dim() == 2: # (1,T)
+            x = x[0]
+        # now (T,)
+        x = x.to(torch.float32)
+        # safety: replace NaNs/Infs
+        x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+        
+        # convert to numpy
+        x = x.numpy().astype(np.float32)
+        
+        if debug:
+            debug_dir = os.path.abspath("./test_debug_audio")
+            os.makedirs(debug_dir, exist_ok=True)
+            out_path = os.path.join(debug_dir, f"{mix_filename}_pred.wav")
+            sf.write(out_path, x, sr)
+
+        return wandb.Audio(x, sample_rate=sr)
+
+    def on_test_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
+        mix_fname = outputs.get("mix_filename")[0]
+        pred_arr = self.to_wandb_audio(outputs["pred"], FS, mix_fname, debug=True)
+        voice_arr = self.to_wandb_audio(outputs["voice"], FS, mix_fname)
+        noise_arr = self.to_wandb_audio(outputs["noise"], FS, mix_fname)
+        mix_arr = self.to_wandb_audio(outputs["mix"], FS, mix_fname)
+        sisdr = outputs.get("sisdr").item()
+        snr = outputs.get("snr").item()
+        control_snr = outputs.get("control_snr").item()        
+
+        self.table_data.append(
+            [
+                batch_idx,
+                pred_arr,
+                voice_arr,
+                noise_arr,
+                mix_arr,
+                sisdr,
+                snr,
+                control_snr,
+                mix_fname,
+            ]
+        )
+        
+    def on_test_end(self):
+        logger = cast(WandbLogger, self.logger)
+        logger.log_table(
+            "test_waveunet_table",
+            columns=[
+                "idx",
+                "predicted_voice",
+                "target_voice",
+                "noise",
+                "mix",
+                "sisdr",
+                "snr",
+                "control_snr",
+                "mix_filename",
+            ],
+            data=self.table_data,
+        )
 if __name__ == "__main__":
     model = WaveUNet()
     x = torch.randn(2, 1, 8000)
