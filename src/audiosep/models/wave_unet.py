@@ -89,11 +89,7 @@ class WaveUNet(L.LightningModule):
         self.lambda_noise = 0.3  # weight for noise loss, voice quality is prioritized
 
         # metrics
-        # legacy/alternate metric instances (used by some helper calls)
-        self.si_snr = ScaleInvariantSignalNoiseRatio()
-        self.pesq = PerceptualEvaluationSpeechQuality(fs=FS, mode="nb")
-        self.stoi = ShortTimeObjectiveIntelligibility(fs=FS, extended=False)
-
+        self.metric_sisnr = ScaleInvariantSignalNoiseRatio()
         self.metric_sisdr = ScaleInvariantSignalDistortionRatio()
         self.metric_sdr = SignalDistortionRatio()
         self.metric_snr = SignalNoiseRatio()
@@ -182,11 +178,11 @@ class WaveUNet(L.LightningModule):
         v_energy = (v_ref.squeeze(1) ** 2).mean(dim=-1)      # (B,)
         v_mask   = (v_energy > 1e-4).float()
 
-        si_v = self.si_snr(v_hat_c.squeeze(1), v_ref.squeeze(1))  # (B,)
+        si_v = self.metric_sisnr(v_hat_c.squeeze(1), v_ref.squeeze(1))  # (B,)
         loss_v = - (si_v * v_mask).sum() / (v_mask.sum() + eps)
 
         # ---- Noise SI-SNR (usually no need to gate since noise is present) ----
-        si_n = self.si_snr(n_hat_c.squeeze(1), n_ref.squeeze(1))  # (B,)
+        si_n = self.metric_sisnr(n_hat_c.squeeze(1), n_ref.squeeze(1))  # (B,)
         loss_n = - si_n.mean()
         
         # Total SI-SNR loss (with weighting)
@@ -278,7 +274,7 @@ class WaveUNet(L.LightningModule):
             context=context,
         )
 
-        # match lengths
+        # match lengths (optional)
         L = min(v_hat.shape[-1], v_ref.shape[-1])
         v_hat = v_hat[..., :L]
         # n_hat = n_hat[..., :L]
@@ -287,7 +283,11 @@ class WaveUNet(L.LightningModule):
         mix   = mix[..., :L]
 
         # metrics (voice only, as in paper)
+        sisnr = self.metric_sisnr(v_hat, v_ref)
+        si_snr_control = self.metric_sisnr(mix, v_ref)
         sisdr = self.metric_sisdr(v_hat, v_ref)
+        # The SDR computation is problematic when the true source is silent or near-silent. 
+        # In case of silence, the SDR is undefined (log(0)), which happens often for vocal tracks
         sdr = self.metric_sdr(v_hat, v_ref)
         snr   = self.metric_snr(v_hat, v_ref)
         pesq  = self.metric_pesq(v_hat, v_ref)
@@ -295,6 +295,8 @@ class WaveUNet(L.LightningModule):
         snr_control = self.metric_snr(mix, v_ref)
 
         # logging
+        self.log("test/si_snr", sisnr, on_step=True, batch_size=1)  
+        self.log("test/si_snr_control", si_snr_control, on_step=True, batch_size=1)
         self.log("test/si_sdr", sisdr, on_step=True, batch_size=1)
         self.log("test/sdr", sdr, on_step=True, batch_size=1)
         self.log("test/snr", snr, on_step=True, batch_size=1)
@@ -311,6 +313,8 @@ class WaveUNet(L.LightningModule):
             "sisdr": sisdr, 
             "snr": snr,
             "control_snr": snr_control, 
+            "si_snr": sisnr,
+            "control_si_snr": si_snr_control,
             "mix_filename": mix_filename,
         }
     
@@ -321,7 +325,7 @@ class WaveUNet(L.LightningModule):
     def on_test_start(self):
         self.table_data: list[list[Any]] = []
         
-    def to_wandb_audio(self, x: torch.Tensor, sr: int, batch_idx: int = 0, debug=False, mix_filename=None) -> wandb.Audio:
+    def to_wandb_audio(self, x: torch.Tensor, sr: int, batch_idx: int = 0, mix_filename=None, debug=False) -> wandb.Audio:
         # Return a sanitized 1D numpy array from a tensor
         # x can be (1,T) or (1,1,T) or (T,)
         x = x.detach().cpu()
@@ -340,20 +344,22 @@ class WaveUNet(L.LightningModule):
         if debug:
             debug_dir = os.path.abspath("./test_debug_audio")
             os.makedirs(debug_dir, exist_ok=True)
-            out_path = os.path.join(debug_dir, f"{mix_filename}_pred.wav")
+            out_path = os.path.join(debug_dir, f"{batch_idx}_{mix_filename}")
             sf.write(out_path, x, sr)
 
         return wandb.Audio(x, sample_rate=sr)
 
     def on_test_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
         mix_fname = outputs.get("mix_filename")[0]
-        pred_arr = self.to_wandb_audio(outputs["pred"], FS, mix_fname, debug=True)
-        voice_arr = self.to_wandb_audio(outputs["voice"], FS, mix_fname)
-        noise_arr = self.to_wandb_audio(outputs["noise"], FS, mix_fname)
-        mix_arr = self.to_wandb_audio(outputs["mix"], FS, mix_fname)
+        pred_arr = self.to_wandb_audio(outputs["pred"], FS, batch_idx, mix_filename=mix_fname, debug=True)
+        voice_arr = self.to_wandb_audio(outputs["voice"], FS, batch_idx, mix_filename=mix_fname)
+        noise_arr = self.to_wandb_audio(outputs["noise"], FS, batch_idx, mix_filename=mix_fname)
+        mix_arr = self.to_wandb_audio(outputs["mix"], FS, batch_idx, mix_filename=mix_fname)
         sisdr = outputs.get("sisdr").item()
         snr = outputs.get("snr").item()
-        control_snr = outputs.get("control_snr").item()        
+        control_snr = outputs.get("control_snr").item()    
+        si_snr = outputs.get("si_snr").item()
+        control_si_snr = outputs.get("control_si_snr").item()    
 
         self.table_data.append(
             [
@@ -365,6 +371,8 @@ class WaveUNet(L.LightningModule):
                 sisdr,
                 snr,
                 control_snr,
+                si_snr,
+                control_si_snr,
                 mix_fname,
             ]
         )
@@ -382,6 +390,8 @@ class WaveUNet(L.LightningModule):
                 "sisdr",
                 "snr",
                 "control_snr",
+                "si_snr",
+                "control_si_snr",
                 "mix_filename",
             ],
             data=self.table_data,
