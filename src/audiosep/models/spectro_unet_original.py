@@ -33,7 +33,9 @@ from audiosep.data.waveform_dataset import WaveFormVoiceNoiseBatch
 class SpectroUNetOriginal(L.LightningModule):
     """6 -level U-Net for spectrogram masking (voice only)."""
 
-    def __init__(self):
+    def __init__(
+        self,
+    ):
         super().__init__()
         self.save_hyperparameters()
 
@@ -162,11 +164,16 @@ class SpectroUNetOriginal(L.LightningModule):
         return self._shared_step(batch, "train")
 
     @override
-    def validation_step(self, batch, _):
-        self._shared_step(batch, "val")
+    def validation_step(self, batch, batch_idx: int):
+        return self.shared_test_step(batch, batch_idx, stage="val")
 
     @override
     def test_step(self, batch: WaveFormVoiceNoiseBatch, batch_idx: int):
+        return self.shared_test_step(batch, batch_idx, stage="test")
+
+    def shared_test_step(
+        self, batch: WaveFormVoiceNoiseBatch, batch_idx: int, stage: str = "test"
+    ):
         if batch.mix.size(0) != 1:
             raise ValueError("Batch size must be 1 for test step.")
         mix_waveform = batch.mix.squeeze()
@@ -238,7 +245,7 @@ class SpectroUNetOriginal(L.LightningModule):
         snr_control = self.metric_snr(control_mix, target)
         # Log metrics
         self.log(
-            "test/si_sdr",
+            f"{stage}/si_sdr",
             sisdr,
             prog_bar=True,
             on_step=True,
@@ -246,17 +253,17 @@ class SpectroUNetOriginal(L.LightningModule):
             batch_size=1,
         )
         self.log(
-            "test/sdr",
+            f"{stage}/sdr",
             sdr,
             prog_bar=True,
             on_step=True,
             on_epoch=True,
             batch_size=1,
         )
-        self.log("test/snr", snr, on_step=True, on_epoch=True, batch_size=1)
-        self.log("test/pesq", pesq, on_step=True, on_epoch=True, batch_size=1)
-        self.log("test/stoi", stoi, on_step=True, on_epoch=True, batch_size=1)
-        self.log("test/control_snr", snr_control, on_step=True, batch_size=1)
+        self.log(f"{stage}/snr", snr, on_step=True, on_epoch=True, batch_size=1)
+        self.log(f"{stage}/pesq", pesq, on_step=True, on_epoch=True, batch_size=1)
+        self.log(f"{stage}/stoi", stoi, on_step=True, on_epoch=True, batch_size=1)
+        self.log(f"{stage}/control_snr", snr_control, on_step=True, batch_size=1)
 
         return {
             "pred": pred_voice,

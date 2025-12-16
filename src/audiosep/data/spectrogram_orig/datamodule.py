@@ -28,7 +28,6 @@ class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
         self.val_split = float(val_split)
         self.seed = int(seed)
         self.train_dataset = OriginalVoiceNoiseDataset(root_dir=self.train_data_dir)
-        self.val_dataset = OriginalVoiceNoiseDataset(root_dir=self.test_data_dir)
         self.test_dataset = WaveFormVoiceNoiseDataset(root_dir=self.test_data_dir)
 
     def train_dataloader(self):
@@ -41,8 +40,8 @@ class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
 
     def val_dataloader(self):
         return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
+            self.test_dataset,
+            batch_size=1,  # really important
             shuffle=False,
             num_workers=self.num_workers,
         )
