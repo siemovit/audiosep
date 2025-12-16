@@ -2,7 +2,7 @@
 import os
 import torch
 from torch.utils.data import Dataset
-from .spectrogram import wav_to_mag_phase
+from audiosep.data.spectrogram.spectrogram import wav_to_mag_phase
 
 
 class VoiceNoiseDataset(Dataset):
@@ -21,8 +21,7 @@ class VoiceNoiseDataset(Dataset):
         os.makedirs(self.cache_dir, exist_ok=True)
 
         self.example_dirs = sorted(
-            d for d in os.listdir(root_dir)
-            if os.path.isdir(os.path.join(root_dir, d))
+            d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))
         )
 
     def __len__(self):
@@ -38,38 +37,39 @@ class VoiceNoiseDataset(Dataset):
         # filenames
         mix_file = [f for f in os.listdir(folder_path) if f.startswith("mix")][0]
 
-        mix_path   = os.path.join(folder_path, mix_file)
+        mix_path = os.path.join(folder_path, mix_file)
         voice_path = os.path.join(folder_path, "voice.wav")
         noise_path = os.path.join(folder_path, "noise.wav")
 
         # cached filenames (déjà normalisés)
-        mix_cache   = os.path.join(self.cache_dir, f"{folder}_mix.pt")
+        mix_cache = os.path.join(self.cache_dir, f"{folder}_mix.pt")
         voice_cache = os.path.join(self.cache_dir, f"{folder}_voice.pt")
         noise_cache = os.path.join(self.cache_dir, f"{folder}_noise.pt")
 
-        load_from_cache = all(os.path.exists(p) for p in
-                              [mix_cache, voice_cache, noise_cache])
+        load_from_cache = all(
+            os.path.exists(p) for p in [mix_cache, voice_cache, noise_cache]
+        )
 
         if load_from_cache:
-            mix_mag   = torch.load(mix_cache)
+            mix_mag = torch.load(mix_cache)
             voice_mag = torch.load(voice_cache)
             noise_mag = torch.load(noise_cache)
 
         else:
             # --- calcul des spectrogrammes sans normalisation ---
-            mix_mag, _   = wav_to_mag_phase(mix_path)
+            mix_mag, _ = wav_to_mag_phase(mix_path)
             voice_mag, _ = wav_to_mag_phase(voice_path)
             noise_mag, _ = wav_to_mag_phase(noise_path)
 
             # --- normalisation commune basée sur le mix ---
             scale = mix_mag.max() + 1e-8  # protège contre silence total
 
-            mix_mag   = mix_mag / scale
+            mix_mag = mix_mag / scale
             voice_mag = voice_mag / scale
             noise_mag = noise_mag / scale
 
             # ajout dimension canal (1, F, T)
-            mix_mag   = mix_mag.unsqueeze(0)
+            mix_mag = mix_mag.unsqueeze(0)
             voice_mag = voice_mag.unsqueeze(0)
             noise_mag = noise_mag.unsqueeze(0)
 
