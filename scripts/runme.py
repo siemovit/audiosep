@@ -9,8 +9,6 @@ import audiosep.data  # pylint: disable=W0611 # noqa: F401 used by the CLI to fi
 import audiosep.models  # pylint: disable=W0611 # noqa: F401 used by the CLI to find models
 import wandb
 
-# simple demo classes for your convenience
-
 
 class CustomSaveConfigCallback(SaveConfigCallback):
     """# from https://github.com/Lightning-AI/pytorch-lightning/issues/19728"""
@@ -22,7 +20,7 @@ class CustomSaveConfigCallback(SaveConfigCallback):
         for logger in trainer.loggers:
             if issubclass(type(logger), WandbLogger):
                 cast(WandbLogger, logger).watch(pl_module, log="all")
-                config = self.parser.dump(self.config, skip_none=False)
+                config = self.config.as_dict()
                 logger.log_hyperparams({"config": config})
         return super().save_config(trainer, pl_module, stage)
 
