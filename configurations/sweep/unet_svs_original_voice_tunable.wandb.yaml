@@ -3,8 +3,8 @@ method: random
 training_set: data/train_small
 early_terminate:
   type: hyperband
-  min_iter: 20
-  max_iter: 50
+  min_iter: 2 # number of times the metric is logged
+  max_iter: 5
   eta: 4
   s: 5
 metric:
