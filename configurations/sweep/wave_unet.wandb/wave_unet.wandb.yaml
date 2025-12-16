@@ -1,0 +1,50 @@
+program: scripts/runme.py
+method: grid
+training_set: data/train_small
+early_terminate:
+  type: hyperband
+  min_iter: 10
+  max_iter: 100
+  eta: 2
+  s: 5
+metric:
+  goal: maximize
+  name: val/si_snr_epoch
+parameters:
+  model.class_path:
+    value: audiosep.models.WaveUNet
+  data.init_args.train_data_dir:
+    value: data/train_small
+  trainer.logger.init_args.name:
+    value: "spectro_UNetOriginal_d${model.init_args.depth}_ch${model.init_args.start_channels}_do${model.init_args.dropout}"
+  model:
+    parameters:
+      init_args:
+        parameters:
+          depth:
+            distribution: int_uniform
+            min: 4
+            max: 8
+          start_channels:
+            distribution: int_uniform
+            min: 8
+            max: 32
+          lambda_mix:
+            distribution: uniform
+            min: 0.2
+            max: 0.8
+          lambda_noise:
+            distribution: uniform
+            min: 0.2
+            max: 0.8
+          dropout:
+            values: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+
+command:
+  - uv
+  - run
+  - ${program}
+  - fit
+  - -c=configurations/fitting/waveunet.yaml
+  - -c
+  - ${args_json_file}
