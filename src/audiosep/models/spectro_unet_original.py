@@ -16,6 +16,8 @@ from torchmetrics.audio import (
 )
 from torchmetrics.audio.pesq import PerceptualEvaluationSpeechQuality
 from torchmetrics.audio.stoi import ShortTimeObjectiveIntelligibility
+from torchmetrics.audio.snr import ScaleInvariantSignalNoiseRatio
+
 import wandb
 
 from audiosep.data.spectrogram_orig.spectogram_dataset import (
@@ -44,7 +46,7 @@ class SpectroUNetOriginal(L.LightningModule):
         self.metric_snr = SignalNoiseRatio()
         self.metric_pesq = PerceptualEvaluationSpeechQuality(fs=FS, mode="nb")
         self.metric_stoi = ShortTimeObjectiveIntelligibility(fs=FS)
-
+        self.metric_sisnr = ScaleInvariantSignalNoiseRatio()
         # Define the network components
         self.conv1 = nn.Sequential(
             nn.Conv2d(1, 16, kernel_size=(5, 5), stride=(2, 2), padding=2),
@@ -242,6 +244,8 @@ class SpectroUNetOriginal(L.LightningModule):
         snr = self.metric_snr(pred_voice, target)
         pesq = self.metric_pesq(pred_voice, target)
         stoi = self.metric_stoi(pred_voice, target)
+        sisnr = self.metric_sisnr(pred_voice, target)
+        si_snr_control = self.metric_sisnr(control_mix, target)
         snr_control = self.metric_snr(control_mix, target)
         # Log metrics
         self.log(
@@ -260,6 +264,8 @@ class SpectroUNetOriginal(L.LightningModule):
             on_epoch=True,
             batch_size=1,
         )
+        self.log(f"{stage}/si_snr", sisnr, on_step=True, batch_size=1)
+        self.log(f"{stage}/control_si_snr", si_snr_control, on_step=True, batch_size=1)
         self.log(f"{stage}/snr", snr, on_step=True, on_epoch=True, batch_size=1)
         self.log(f"{stage}/pesq", pesq, on_step=True, on_epoch=True, batch_size=1)
         self.log(f"{stage}/stoi", stoi, on_step=True, on_epoch=True, batch_size=1)
