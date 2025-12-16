@@ -281,6 +281,7 @@ class SpectroUNetOriginal(L.LightningModule):
             "snr": snr,
             "control_snr": snr_control,
             "mix_filename": batch.mix_filename,
+            "mix_original_snr": int(batch.mix_filename[0].split(".")[0].split("_")[-1]),
         }
 
     @override
@@ -302,6 +303,8 @@ class SpectroUNetOriginal(L.LightningModule):
         voice_np = outputs["voice"].cpu().numpy().astype("float32")
         noise_np = outputs["noise"].cpu().numpy().astype("float32")
         mix_np = outputs["mix"].cpu().numpy().astype("float32")
+        mix_original_snr = outputs.get("mix_original_snr")
+
         self.table_data.append(
             [
                 batch_idx,
@@ -313,6 +316,7 @@ class SpectroUNetOriginal(L.LightningModule):
                 outputs["snr"].item(),
                 outputs["control_snr"].item(),
                 outputs["mix_filename"][0],
+                mix_original_snr,
             ]
         )
 
@@ -331,6 +335,7 @@ class SpectroUNetOriginal(L.LightningModule):
                 "snr",
                 "control_snr",
                 "mix_filename",
+                "mix_original_snr",
             ],
             data=self.table_data,
         )

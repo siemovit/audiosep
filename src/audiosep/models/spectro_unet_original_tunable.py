@@ -16,6 +16,8 @@ from torchmetrics.audio import (
 )
 from torchmetrics.audio.pesq import PerceptualEvaluationSpeechQuality
 from torchmetrics.audio.stoi import ShortTimeObjectiveIntelligibility
+from torchmetrics.audio.snr import ScaleInvariantSignalNoiseRatio
+
 import wandb
 
 from audiosep.data.spectrogram_orig.spectogram_dataset import (
@@ -47,6 +49,8 @@ class SpectroUNetOriginalTunable(L.LightningModule):
         self.metric_snr = SignalNoiseRatio()
         self.metric_pesq = PerceptualEvaluationSpeechQuality(fs=FS, mode="nb")
         self.metric_stoi = ShortTimeObjectiveIntelligibility(fs=FS)
+        self.metric_sisnr = ScaleInvariantSignalNoiseRatio()
+
         self.depth = depth
 
         self.depth = depth
@@ -277,6 +281,9 @@ class SpectroUNetOriginalTunable(L.LightningModule):
         pesq = self.metric_pesq(pred_voice, target)
         stoi = self.metric_stoi(pred_voice, target)
         snr_control = self.metric_snr(control_mix, target)
+        sisnr = self.metric_sisnr(pred_voice, target)
+        si_snr_control = self.metric_sisnr(control_mix, target)
+
         # Log metrics
         self.log(
             f"{stage}/si_sdr",
@@ -298,7 +305,8 @@ class SpectroUNetOriginalTunable(L.LightningModule):
         self.log(f"{stage}/pesq", pesq, on_step=True, on_epoch=True, batch_size=1)
         self.log(f"{stage}/stoi", stoi, on_step=True, on_epoch=True, batch_size=1)
         self.log(f"{stage}/control_snr", snr_control, on_step=True, batch_size=1)
-
+        self.log(f"{stage}/si_snr", sisnr, on_step=True, batch_size=1)
+        self.log(f"{stage}/control_si_snr", si_snr_control, on_step=True, batch_size=1)
         return {
             "pred": pred_voice,
             "mix": mix_waveform,
@@ -309,6 +317,7 @@ class SpectroUNetOriginalTunable(L.LightningModule):
             "snr": snr,
             "control_snr": snr_control,
             "mix_filename": batch.mix_filename,
+            "mix_original_snr": int(batch.mix_filename[0].split(".")[0].split("_")[-1]),
         }
 
     @override
@@ -330,6 +339,7 @@ class SpectroUNetOriginalTunable(L.LightningModule):
         voice_np = outputs["voice"].cpu().numpy().astype("float32")
         noise_np = outputs["noise"].cpu().numpy().astype("float32")
         mix_np = outputs["mix"].cpu().numpy().astype("float32")
+        mix_original_snr = outputs.get("mix_original_snr")
         self.table_data.append(
             [
                 batch_idx,
@@ -341,6 +351,7 @@ class SpectroUNetOriginalTunable(L.LightningModule):
                 outputs["snr"].item(),
                 outputs["control_snr"].item(),
                 outputs["mix_filename"][0],
+                mix_original_snr,
             ]
         )
 
@@ -359,6 +370,7 @@ class SpectroUNetOriginalTunable(L.LightningModule):
                 "snr",
                 "control_snr",
                 "mix_filename",
+                "mix_original_snr",
             ],
             data=self.table_data,
         )
