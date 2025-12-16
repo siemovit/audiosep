@@ -1,5 +1,5 @@
 # lightning.pytorch==2.6.0
-seed_everything: true
+seed_everything: 42
 trainer:
   accelerator: auto
   strategy: auto
@@ -58,12 +58,13 @@ model:
     base_filters: 24
 
 data:
-  class_path: audiosep.data.OriginalVoiceNoiseDatamodule
+  class_path: audiosep.data.WaveDatamodule
   init_args:
     train_data_dir: data/train
     test_data_dir: data/test
     batch_size: 1
     num_workers: 0
+    seed: 42
 optimizer: null
 lr_scheduler: null
 checkpoint_reference: simon-yannis/audiosep/model-0kk9bxsi:v7
