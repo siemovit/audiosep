@@ -10,7 +10,7 @@ trainer:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: audiosep
-      name: spectro_UNetOriginal_d${model.init_args.depth}_ch${model.init_args.start_channels}_do${model.init_args.dropout}
+      name: spectro_UNetOriginal_run_fit_tunable
       log_model: all
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
