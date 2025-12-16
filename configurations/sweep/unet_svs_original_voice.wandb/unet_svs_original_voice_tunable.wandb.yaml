@@ -1,15 +1,15 @@
 program: scripts/runme.py
-method: grid
+method: random
 training_set: data/train_small
 early_terminate:
   type: hyperband
-  min_iter: 10
-  max_iter: 100
-  eta: 2
+  min_iter: 20
+  max_iter: 50
+  eta: 4
   s: 5
 metric:
   goal: maximize
-  name: val/snr_epoch
+  name: val/si_snr_epoch
 parameters:
   model.class_path:
     value: audiosep.models.SpectroUNetOriginalTunable
@@ -28,7 +28,7 @@ parameters:
           start_channels:
             distribution: int_uniform
             min: 8
-            max: 32
+            max: 24
           dropout:
             values: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
 
