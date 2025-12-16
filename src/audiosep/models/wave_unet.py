@@ -258,7 +258,7 @@ class WaveUNet(L.LightningModule):
         return self._shared_step(batch, "train")
 
     def validation_step(self, batch, batch_idx):
-        return self._shared_test_step(batch, "val")
+        return self.shared_test_step(batch, "val")
 
     @torch.no_grad()
     def infer_full_simple(self, mix, out_len, context):
