@@ -1,5 +1,5 @@
 # lightning.pytorch==2.6.0
-seed_everything: true
+seed_everything: 42
 trainer:
   accelerator: auto
   strategy: auto
@@ -10,7 +10,7 @@ trainer:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: audiosep
-      name: spectro_UNetOriginal_run
+      name: spectro_UNetOriginal_run_fit_tunable
       log_model: all
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
@@ -24,12 +24,12 @@ trainer:
   min_steps: null
   max_time: null
   limit_train_batches: null
-  limit_val_batches: null
+  limit_val_batches: 10
   limit_test_batches: 100
   limit_predict_batches: null
   overfit_batches: 0.0
   val_check_interval: null
-  check_val_every_n_epoch: 1
+  check_val_every_n_epoch: 10 # validating is really slow so we do it less often
   num_sanity_val_steps: null
   log_every_n_steps: 10
   enable_checkpointing: null
@@ -52,7 +52,9 @@ trainer:
   enable_autolog_hparams: true
   model_registry: null
 model:
-  class_path: audiosep.models.SpectroUNetOriginal
+  class_path: audiosep.models.SpectroUNetOriginalTunable
+  init_args:
+    depth: 6
 
 data:
   class_path: audiosep.data.OriginalVoiceNoiseDatamodule
@@ -61,8 +63,8 @@ data:
     test_data_dir: data/test
     batch_size: 128
     num_workers: 0
+    seed: 42
 optimizer: null
 lr_scheduler: null
 checkpoint_reference: simon-yannis/audiosep/model-qeljoiln:latest
-verbose: true
 weights_only: null

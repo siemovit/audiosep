@@ -1,4 +1,3 @@
-import os
 from typing import Dict, List, Tuple
 
 import lightning as L
@@ -32,23 +31,9 @@ class VoiceNoiseDatamodule(L.LightningDataModule):
 
         # placeholders set in setup
 
-        all_folders_train = sorted(
-            d
-            for d in os.listdir(self.train_data_dir)
-            if os.path.isdir(os.path.join(self.train_data_dir, d))
-        )
-
         # create train dataset
         self.train_dataset = VoiceNoiseDataset(root_dir=self.train_data_dir)
-        self.train_dataset.example_dirs = all_folders_train
-
-        all_folders_test = sorted(
-            d
-            for d in os.listdir(self.test_data_dir)
-            if os.path.isdir(os.path.join(self.test_data_dir, d))
-        )
         self.val_dataset = VoiceNoiseDataset(root_dir=self.test_data_dir)
-        self.val_dataset.example_dirs = all_folders_test
         self.test_dataset = WaveFormVoiceNoiseDataset(root_dir=self.test_data_dir)
 
     def train_dataloader(self):

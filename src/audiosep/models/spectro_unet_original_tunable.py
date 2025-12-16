@@ -1,4 +1,4 @@
-"""6 -level U-Net for spectrogram masking (voice only)."""
+"""Tunable -level U-Net for spectrogram masking (voice only)."""
 
 from typing import Union, cast, Any, override
 
@@ -30,11 +30,14 @@ from audiosep.data.spectrogram_orig.spectrogram import (
 from audiosep.data.waveform_dataset import WaveFormVoiceNoiseBatch
 
 
-class SpectroUNetOriginal(L.LightningModule):
-    """6 -level U-Net for spectrogram masking (voice only)."""
+class SpectroUNetOriginalTunable(L.LightningModule):
+    """Tunable -level U-Net for spectrogram masking (voice only)."""
 
     def __init__(
         self,
+        dropout: float = 0.5,
+        depth: int = 6,
+        start_channels: int = 16,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -44,73 +47,81 @@ class SpectroUNetOriginal(L.LightningModule):
         self.metric_snr = SignalNoiseRatio()
         self.metric_pesq = PerceptualEvaluationSpeechQuality(fs=FS, mode="nb")
         self.metric_stoi = ShortTimeObjectiveIntelligibility(fs=FS)
+        self.depth = depth
 
-        # Define the network components
-        self.conv1 = nn.Sequential(
-            nn.Conv2d(1, 16, kernel_size=(5, 5), stride=(2, 2), padding=2),
-            nn.BatchNorm2d(16),
-            nn.LeakyReLU(True),
-        )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(16, 32, kernel_size=(5, 5), stride=(2, 2), padding=2),
-            nn.BatchNorm2d(32),
-            nn.LeakyReLU(True),
-        )
-        self.conv3 = nn.Sequential(
-            nn.Conv2d(32, 64, kernel_size=(5, 5), stride=(2, 2), padding=2),
-            nn.BatchNorm2d(64),
-            nn.LeakyReLU(True),
-        )
-        self.conv4 = nn.Sequential(
-            nn.Conv2d(64, 128, kernel_size=(5, 5), stride=(2, 2), padding=2),
-            nn.BatchNorm2d(128),
-            nn.LeakyReLU(True),
-        )
-        self.conv5 = nn.Sequential(
-            nn.Conv2d(128, 256, kernel_size=(5, 5), stride=(2, 2), padding=2),
-            nn.BatchNorm2d(256),
-            nn.LeakyReLU(True),
-        )
-        self.conv6 = nn.Sequential(
-            nn.Conv2d(256, 512, kernel_size=(5, 5), stride=(2, 2), padding=2),
-            nn.BatchNorm2d(512),
-            nn.LeakyReLU(True),
-        )
-        self.deconv1 = nn.ConvTranspose2d(
-            512, 256, kernel_size=(5, 5), stride=(2, 2), padding=2
-        )
-        self.deconv1_bad = nn.Sequential(
-            nn.BatchNorm2d(256), nn.ReLU(True), nn.Dropout2d(0.5)
-        )
-        self.deconv2 = nn.ConvTranspose2d(
-            512, 128, kernel_size=(5, 5), stride=(2, 2), padding=2
-        )
-        self.deconv2_bad = nn.Sequential(
-            nn.BatchNorm2d(128), nn.ReLU(True), nn.Dropout2d(0.5)
-        )
-        self.deconv3 = nn.ConvTranspose2d(
-            256, 64, kernel_size=(5, 5), stride=(2, 2), padding=2
-        )
-        self.deconv3_bad = nn.Sequential(
-            nn.BatchNorm2d(64), nn.ReLU(True), nn.Dropout2d(0.5)
-        )
-        self.deconv4 = nn.ConvTranspose2d(
-            128, 32, kernel_size=(5, 5), stride=(2, 2), padding=2
-        )
-        self.deconv4_bad = nn.Sequential(
-            nn.BatchNorm2d(32), nn.ReLU(True), nn.Dropout2d(0.5)
-        )
-        self.deconv5 = nn.ConvTranspose2d(
-            64, 16, kernel_size=(5, 5), stride=(2, 2), padding=2
-        )
-        self.deconv5_bad = nn.Sequential(
-            nn.BatchNorm2d(16), nn.ReLU(True), nn.Dropout2d(0.5)
-        )
-        self.deconv6 = nn.ConvTranspose2d(
-            32, 1, kernel_size=(5, 5), stride=(2, 2), padding=2
-        )
+        self.depth = depth
 
-        # Define the criterion and optimizer
+        # --- ENCODER ---
+        self.encoder_layers = nn.ModuleList()
+        in_c = 1
+        out_c = start_channels
+
+        # Store expected channel sizes to help build the decoder mirror
+        encoder_channels = []
+
+        for _ in range(depth):
+            block = nn.Sequential(
+                nn.Conv2d(in_c, out_c, kernel_size=(5, 5), stride=(2, 2), padding=2),
+                nn.BatchNorm2d(out_c),
+                nn.LeakyReLU(True),
+            )
+            self.encoder_layers.append(block)
+            encoder_channels.append(out_c)
+
+            in_c = out_c
+            out_c *= 2
+
+        # --- DECODER ---
+        self.decoder_trans = nn.ModuleList()
+        self.decoder_bn = nn.ModuleList()
+
+        # Reverse channels for decoder construction: e.g., [512, 256, 128, 64, 32, 16]
+        rev_channels = list(reversed(encoder_channels))
+
+        for i in range(depth):
+            # Determine Input Channels
+            if i == 0:
+                # Top of the U-Net (bottleneck): Input is just the last encoder output
+                decoder_in_c = rev_channels[i]
+            else:
+                # Subsequent layers: Input is (Previous Decoder Out) + (Skip Connection)
+                # In standard U-Net, these usually have the same channel count, so we multiply by 2.
+                # Logic: We are concatenating the result of the previous layer (which has `rev_channels[i]` channels)
+                # with the skip connection from the encoder (which also has `rev_channels[i]` channels).
+                decoder_in_c = rev_channels[i] * 2
+
+            # Determine Output Channels
+            if i == depth - 1:
+                # Final layer outputs 1 channel (the mask)
+                decoder_out_c = 1
+            else:
+                # Outputs the channel count of the next layer down
+                decoder_out_c = rev_channels[i + 1]
+
+            # 1. Transpose Convolution
+            self.decoder_trans.append(
+                nn.ConvTranspose2d(
+                    decoder_in_c,
+                    decoder_out_c,
+                    kernel_size=(5, 5),
+                    stride=(2, 2),
+                    padding=2,
+                )
+            )
+
+            # 2. BN/ReLU/Dropout Block (The "bad" block in original code)
+            # The last layer (i == depth - 1) does NOT have BN/ReLU/Dropout
+            if i < depth - 1:
+                self.decoder_bn.append(
+                    nn.Sequential(
+                        nn.BatchNorm2d(decoder_out_c),
+                        nn.ReLU(True),
+                        nn.Dropout2d(dropout),
+                    )
+                )
+            else:
+                self.decoder_bn.append(nn.Identity())
+
         self.crit = nn.L1Loss()
 
     @override
@@ -121,34 +132,57 @@ class SpectroUNetOriginal(L.LightningModule):
         Arg:    mix     (torch.Tensor)  - The mixture spectrogram which size is (B, 1, 512, 128)
         Ret:    The soft mask which size is (B, 1, 512, 128)
         """
-        conv1_out = self.conv1(mix)
-        conv2_out = self.conv2(conv1_out)
-        conv3_out = self.conv3(conv2_out)
-        conv4_out = self.conv4(conv3_out)
-        conv5_out = self.conv5(conv4_out)
-        conv6_out = self.conv6(conv5_out)
-        deconv1_out = self.deconv1(conv6_out, output_size=conv5_out.size())
-        deconv1_out = self.deconv1_bad(deconv1_out)
-        deconv2_out = self.deconv2(
-            torch.cat([deconv1_out, conv5_out], 1), output_size=conv4_out.size()
-        )
-        deconv2_out = self.deconv2_bad(deconv2_out)
-        deconv3_out = self.deconv3(
-            torch.cat([deconv2_out, conv4_out], 1), output_size=conv3_out.size()
-        )
-        deconv3_out = self.deconv3_bad(deconv3_out)
-        deconv4_out = self.deconv4(
-            torch.cat([deconv3_out, conv3_out], 1), output_size=conv2_out.size()
-        )
-        deconv4_out = self.deconv4_bad(deconv4_out)
-        deconv5_out = self.deconv5(
-            torch.cat([deconv4_out, conv2_out], 1), output_size=conv1_out.size()
-        )
-        deconv5_out = self.deconv5_bad(deconv5_out)
-        deconv6_out = self.deconv6(
-            torch.cat([deconv5_out, conv1_out], 1), output_size=mix.size()
-        )
-        out = torch.sigmoid(deconv6_out)
+        x = mix
+
+        # We need to store outputs for skip connections
+        # encoder_outputs[0] -> result of layer 1 (channels=16)
+        # encoder_outputs[-1] -> result of bottleneck (channels=512)
+        encoder_outputs = []
+        x = mix
+        for layer in self.encoder_layers:
+            x = layer(x)
+            encoder_outputs.append(x)
+
+        # --- DECODER PASS ---
+        # x currently holds the bottleneck output (equivalent to conv6_out)
+
+        for i in range(self.depth):
+            # 1. Prepare Input
+            if i == 0:
+                # First decoder step just takes the bottleneck
+                inp = x
+                # The target size for this unpooling is the size of the layer *before* the bottleneck
+                # i.e., encoder_outputs[-2]
+                target_output_size = encoder_outputs[-(i + 2)].size()
+            else:
+                # Subsequent steps take (Previous Output concatenated with Skip Connection)
+                # Skip connection index:
+                # If i=1 (second decoder layer), we need skip from encoder_outputs[-2] (conv5)
+                # Wait, let's trace:
+                # i=0 uses encoder_outputs[-1] (conv6) as input.
+                # i=1 uses cat(decoder_prev, encoder_outputs[-2]).
+
+                skip_connection = encoder_outputs[-(i + 1)]
+                inp = torch.cat([x, skip_connection], 1)
+
+                # Determine output_size for Transpose Conv
+                if i == self.depth - 1:
+                    # Last layer targets the original mix size
+                    target_output_size = mix.size()
+                else:
+                    # Others target the specific encoder layer size below them
+                    target_output_size = encoder_outputs[-(i + 2)].size()
+
+            # 2. Transpose Conv
+            # Note: We must index the ModuleList manually
+            x = self.decoder_trans[i](inp, output_size=target_output_size)
+
+            # 3. Activation/Dropout (BN -> ReLU -> Drop)
+            # This is an Identity() for the last layer
+            x = self.decoder_bn[i](x)
+
+        # Final Sigmoid activation
+        out = torch.sigmoid(x)
         return out
 
     def _shared_step(self, batch: OriginalVoiceNoiseDatasetBatch, stage: str):

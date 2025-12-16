@@ -20,38 +20,15 @@ class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
         seed: int = 42,
     ):
         super().__init__()
-        # data directories
         self.train_data_dir = train_data_dir
         self.test_data_dir = test_data_dir
 
-        # data loading params
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.val_split = float(val_split)
         self.seed = int(seed)
         self.train_dataset = OriginalVoiceNoiseDataset(root_dir=self.train_data_dir)
-        self.val_dataset = OriginalVoiceNoiseDataset(root_dir=self.test_data_dir)
         self.test_dataset = WaveFormVoiceNoiseDataset(root_dir=self.test_data_dir)
-
-    def setup(self, stage=None):
-        # list example folders and split deterministically
-        if stage == "fit":
-            all_folders_train = sorted(
-                d
-                for d in os.listdir(self.train_data_dir)
-                if os.path.isdir(os.path.join(self.train_data_dir, d))
-            )
-
-            # create train dataset
-            self.train_dataset.audio_sample_dirs = all_folders_train
-
-        if self.test_data_dir is not None:
-            all_folders_test = sorted(
-                d
-                for d in os.listdir(self.test_data_dir)
-                if os.path.isdir(os.path.join(self.test_data_dir, d))
-            )
-            self.val_dataset.audio_sample_dirs = all_folders_test
 
     def train_dataloader(self):
         return DataLoader(
@@ -63,8 +40,8 @@ class OriginalVoiceNoiseDatamodule(L.LightningDataModule):
 
     def val_dataloader(self):
         return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
+            self.test_dataset,
+            batch_size=1,  # really important
             shuffle=False,
             num_workers=self.num_workers,
         )

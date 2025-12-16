@@ -1,5 +1,5 @@
 # lightning.pytorch==2.6.0
-seed_everything: true
+seed_everything: 42
 trainer:
   accelerator: auto
   strategy: auto
@@ -61,6 +61,7 @@ data:
     test_data_dir: data/test
     batch_size: 128
     num_workers: 0
+    seed: 42
 optimizer: null
 lr_scheduler: null
 checkpoint_reference: simon-yannis/audiosep/model-ybsk31r3:latest

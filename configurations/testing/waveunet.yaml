@@ -1,7 +1,7 @@
 # lightning.pytorch==2.6.0
-seed_everything: true
+seed_everything: 42
 trainer:
-  accelerator: cpu
+  accelerator: auto
   strategy: auto
   devices: auto
   num_nodes: 1
@@ -18,7 +18,7 @@ trainer:
         every_n_epochs: 5
         filename: "{epoch:02d}"
   fast_dev_run: false
-  max_epochs: 100
+  max_epochs: 50
   min_epochs: null
   max_steps: -1
   min_steps: null
@@ -32,11 +32,11 @@ trainer:
   check_val_every_n_epoch: 1
   num_sanity_val_steps: null
   log_every_n_steps: 10
+  gradient_clip_val: 1.0
   enable_checkpointing: null
   enable_progress_bar: true
   enable_model_summary: null
   accumulate_grad_batches: 1
-  gradient_clip_val: null
   gradient_clip_algorithm: null
   deterministic: null
   benchmark: null
@@ -53,14 +53,18 @@ trainer:
   model_registry: null
 model:
   class_path: audiosep.models.WaveUNet
+  init_args:
+    depth: 5
+    base_filters: 24
 
 data:
-  class_path: audiosep.data.OriginalVoiceNoiseDatamodule
+  class_path: audiosep.data.WaveDatamodule
   init_args:
     train_data_dir: data/train
     test_data_dir: data/test
     batch_size: 1
     num_workers: 0
+    seed: 42
 optimizer: null
 lr_scheduler: null
 checkpoint_reference: simon-yannis/audiosep/model-0kk9bxsi:v7
