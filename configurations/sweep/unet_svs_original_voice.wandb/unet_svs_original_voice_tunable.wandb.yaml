@@ -1,0 +1,30 @@
+program: scripts/runme.py
+method: grid
+training_set: data/train_small
+metric:
+  goal: maximize
+  name: val/snr
+parameters:
+  model.class_path:
+    value: audiosep.models.SpectroUNetOriginalTunable
+  model.init_args.depth:
+    distribution: int_uniform
+    min: 4
+    max: 8
+  model.init_args.start_channels:
+    distribution: int_uniform
+    min: 8
+    max: 32
+  model.init_args.dropout:
+    values: [0.0, 0.1, 0.2, 0.3, 0.4, 0.5]
+  data.init_args.train_data_dir:
+    value: data/train_small
+
+command:
+  - uv
+  - run
+  - ${program}
+  - fit
+  - -c=configurations/fitting/unet_svs_original_voice.yaml
+  - -c
+  - ${args_json_file}
