@@ -16,7 +16,7 @@ parameters:
   data.init_args.train_data_dir:
     value: data/train_small
   trainer.logger.init_args.name:
-    value: "spectro_UNetOriginal_d${model.init_args.depth}_ch${model.init_args.start_channels}_do${model.init_args.dropout}"
+    value: "WaveUNet_d${model.init_args.depth}_ch${model.init_args.start_channels}_do${model.init_args.dropout}_lmix${model.init_args.lambda_mix}_lnoise${model.init_args.lambda_noise}"
   model:
     parameters:
       init_args:
