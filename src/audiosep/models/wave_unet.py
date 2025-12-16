@@ -254,7 +254,7 @@ class WaveUNet(L.LightningModule):
         return self._shared_step(batch, "train")
 
     def validation_step(self, batch, batch_idx):
-        return self._shared_step(batch, "val")
+        return self._shared_test_step(batch, "val")
 
     @torch.no_grad()
     def infer_full_simple(self, mix, out_len, context):
@@ -312,7 +312,11 @@ class WaveUNet(L.LightningModule):
             :, :T
         ]
 
-    def test_step(self, batch: WaveFormVoiceNoiseBatch, batch_idx):
+    
+    def test_step(self, batch: WaveFormVoiceNoiseBatch, batch_idx: int):
+        return self.shared_test_step(batch, batch_idx, stage="test")
+    
+    def shared_test_step(self, batch: WaveFormVoiceNoiseBatch, batch_idx, stage="test"):
         mix, v_ref, n_ref, mix_filename = batch  # full signals
 
         # same as dataset windowing
@@ -335,7 +339,7 @@ class WaveUNet(L.LightningModule):
 
         # metrics (voice only, as in paper)
         sisnr = self.metric_sisnr(v_hat, v_ref)
-        si_snr_control = self.metric_sisnr(mix, v_ref)
+        control_si_snr = self.metric_sisnr(mix, v_ref)
         sisdr = self.metric_sisdr(v_hat, v_ref)
         # The SDR computation is problematic when the true source is silent or near-silent.
         # In case of silence, the SDR is undefined (log(0)), which happens often for vocal tracks
@@ -347,7 +351,7 @@ class WaveUNet(L.LightningModule):
 
         # logging
         self.log("test/si_snr", sisnr, on_step=True, batch_size=1)
-        self.log("test/si_snr_control", si_snr_control, on_step=True, batch_size=1)
+        self.log("test/control_si_snr", control_si_snr, on_step=True, batch_size=1)
         self.log("test/si_sdr", sisdr, on_step=True, batch_size=1)
         self.log("test/sdr", sdr, on_step=True, batch_size=1)
         self.log("test/snr", snr, on_step=True, batch_size=1)
@@ -365,7 +369,7 @@ class WaveUNet(L.LightningModule):
             "snr": snr,
             "control_snr": snr_control,
             "si_snr": sisnr,
-            "control_si_snr": si_snr_control,
+            "control_si_snr": control_si_snr,
             "mix_filename": mix_filename,
             "mix_original_snr": int(mix_filename.split(".")[0].split("_")[-1]),  # hack
         }
