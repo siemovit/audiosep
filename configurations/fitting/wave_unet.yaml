@@ -54,10 +54,14 @@ trainer:
 model:
   class_path: audiosep.models.WaveUNet
   init_args:
-    depth: 6
+    depth: 5
+    base_filters: 16
+    dropout: 0.0
+    lambda_mix: 0.5
+    lambda_noise: 0.2
 
 data:
-  class_path: audiosep.data.WaveUNetDatamodule
+  class_path: audiosep.data.WaveDatamodule
   init_args:
     train_data_dir: data/train
     test_data_dir: data/test
