@@ -367,6 +367,7 @@ class WaveUNet(L.LightningModule):
             "si_snr": sisnr,
             "control_si_snr": si_snr_control,
             "mix_filename": mix_filename,
+            "mix_original_snr": int(mix_filename.split(".")[0].split("_")[-1]),  # hack
         }
 
     def configure_optimizers(self):
@@ -437,6 +438,7 @@ class WaveUNet(L.LightningModule):
         control_snr = outputs.get("control_snr").item()
         si_snr = outputs.get("si_snr").item()
         control_si_snr = outputs.get("control_si_snr").item()
+        mix_original_snr = outputs.get("mix_original_snr")
 
         self.table_data.append(
             [
@@ -451,6 +453,7 @@ class WaveUNet(L.LightningModule):
                 si_snr,
                 control_si_snr,
                 mix_fname,
+                mix_original_snr
             ]
         )
 
@@ -470,6 +473,7 @@ class WaveUNet(L.LightningModule):
                 "si_snr",
                 "control_si_snr",
                 "mix_filename",
+                "mix_original_snr",
             ],
             data=self.table_data,
         )
