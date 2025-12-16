@@ -27,6 +27,7 @@ class WaveFormVoiceNoiseDataset(Dataset):
         self.audio_sample_dirs = sorted(
             d for d in os.listdir(root_dir) if os.path.isdir(os.path.join(root_dir, d))
         )
+        self.example_dirs = self.audio_sample_dirs  # for compatibility
 
     def __len__(self):
         return len(self.audio_sample_dirs)
