@@ -402,7 +402,7 @@ class WaveUNet(L.LightningModule):
             return
         mix_fname = outputs.get("mix_filename")[0]
         pred_arr = self.to_wandb_audio(
-            outputs["pred"], FS, batch_idx, mix_filename=mix_fname, debug=True
+            outputs["pred"], FS, batch_idx, mix_filename=mix_fname
         )
         voice_arr = self.to_wandb_audio(
             outputs["voice"], FS, batch_idx, mix_filename=mix_fname
