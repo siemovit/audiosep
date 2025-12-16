@@ -354,14 +354,14 @@ class WaveUNet(L.LightningModule):
         snr_control = self.metric_snr(mix, v_ref)
 
         # logging
-        self.log("test/si_snr", sisnr, on_step=True, batch_size=1)
-        self.log("test/control_si_snr", control_si_snr, on_step=True, batch_size=1)
-        self.log("test/si_sdr", sisdr, on_step=True, batch_size=1)
-        self.log("test/sdr", sdr, on_step=True, batch_size=1)
-        self.log("test/snr", snr, on_step=True, batch_size=1)
-        self.log("test/pesq", pesq, on_step=True, batch_size=1)
-        self.log("test/stoi", stoi, on_step=True, batch_size=1)
-        self.log("control_snr", snr_control, on_step=True, batch_size=1)
+        self.log(f"{stage}/si_snr", sisnr, on_step=True, batch_size=1)
+        self.log(f"{stage}/control_si_snr", control_si_snr, on_step=True, batch_size=1)
+        self.log(f"{stage}/si_sdr", sisdr, on_step=True, batch_size=1)
+        self.log(f"{stage}/sdr", sdr, on_step=True, batch_size=1)
+        self.log(f"{stage}/snr", snr, on_step=True, batch_size=1)
+        self.log(f"{stage}/pesq", pesq, on_step=True, batch_size=1)
+        self.log(f"{stage}/stoi", stoi, on_step=True, batch_size=1)
+        self.log(f"{stage}/control_snr", snr_control, on_step=True, batch_size=1)
 
         return {
             "pred": v_hat,
