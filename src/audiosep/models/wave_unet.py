@@ -87,23 +87,23 @@ class WaveUNet(L.LightningModule):
         - base_filters: channel step per layer
     """
 
-    def __init__(
-        self,
-        in_channels: int = 1,
-        out_channels: int = 2,
-        depth: int = 5,
-        base_filters: int = 24,
-        lr: float = 1e-3,
-    ):
+    def __init__(self, 
+                 depth: int = 5, 
+                 base_filters: int = 24, 
+                 lr: float = 1e-3, 
+                 lambda_mix: float = 0.1, 
+                 lambda_noise: float = 0.3, 
+                 mse_loss: bool = False):
         super().__init__()
         self.save_hyperparameters()
         self.depth = int(depth)
         self.base_filters = int(base_filters)
-        self.in_channels = int(in_channels)
-        self.out_channels = int(out_channels)
-        self.lambda_mix = 0.1  # weight for mix loss
+        self.in_channels = 1 # mono input
+        self.out_channels = 2 # voice + noise
+        self.lambda_mix = lambda_mix  # weight for mix loss
         self.lr = lr
-        self.lambda_noise = 0.3  # weight for noise loss, voice quality is prioritized
+        self.lambda_noise = lambda_noise  # weight for noise loss, voice quality is prioritized
+        self.mse_loss = mse_loss  # use MSE loss instead of SI-SNR
 
         # metrics
         self.metric_sisnr = ScaleInvariantSignalNoiseRatio()
@@ -211,34 +211,43 @@ class WaveUNet(L.LightningModule):
         v_hat_c = center_crop(v_hat, out_len)
         n_hat_c = center_crop(n_hat, out_len)
         mix_c = center_crop(x, out_len)
-
-        # ---- Baseline ---
-        # ---- Voice SI-SNR with silence gating ----
-        eps = 1e-8
-        v_energy = (v_ref.squeeze(1) ** 2).mean(dim=-1)  # (B,)
-        v_mask = (v_energy > 1e-4).float()
-
-        si_v = self.metric_sisnr(v_hat_c.squeeze(1), v_ref.squeeze(1))  # (B,)
-        loss_v = -(si_v * v_mask).sum() / (v_mask.sum() + eps)
-
-        # ---- Noise SI-SNR (usually no need to gate since noise is present) ----
-        si_n = self.metric_sisnr(n_hat_c.squeeze(1), n_ref.squeeze(1))  # (B,)
-        loss_n = -si_n.mean()
-
-        # Total SI-SNR loss (with weighting)
-        loss_si = loss_v + self.lambda_noise * loss_n
-
-        # ---- Mixture consistency ----
-        loss_mix = F.mse_loss(v_hat_c + n_hat_c, mix_c)
-
-        # Total loss
-        loss = loss_si + self.lambda_mix * loss_mix
-
-        # logging
+        
+        # ---- Losses ----
+        # ---- Baseline (MSE) ---
+        if self.mse_loss:
+            loss_v = F.mse_loss(v_hat_c, v_ref)
+            loss_n = F.mse_loss(n_hat_c, n_ref)
+            loss = loss_v + loss_n
+        
+        else:
+            # ---- Voice + Noise SI-SNR with silence gating ----
+            eps = 1e-8
+            v_energy = (v_ref.squeeze(1) ** 2).mean(dim=-1)      # (B,)
+            v_mask   = (v_energy > 1e-4).float()
+            si_v = self.metric_sisnr(v_hat_c.squeeze(1), v_ref.squeeze(1))  # (B,)
+            loss_v = - (si_v * v_mask).sum() / (v_mask.sum() + eps)
+            # Noise SI-SNR (usually no need to gate since noise is present) ----
+            si_n = self.metric_sisnr(n_hat_c.squeeze(1), n_ref.squeeze(1))  # (B,)
+            loss_n = - si_n.mean()
+            # Total SI-SNR loss (with weighting)
+            loss_si = loss_v + self.lambda_noise * loss_n
+            # Mixture consistency ----
+            loss_mix = F.mse_loss(v_hat_c + n_hat_c, mix_c)
+            
+            # Total loss
+            loss = loss_si + self.lambda_mix * loss_mix     
+            
+            # log individual losses
+            self.log(f"{stage}_loss_si", loss_si, on_step=True)
+            self.log(f"{stage}_loss_mix", loss_mix, on_step=True) 
+        
+        # ---- Voice SI-SNR with silence gating + PIT ----
+        # TODO: (re)-implement PIT version
+        
+        
+        # global loss logging
         self.log(f"{stage}_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log(f"{stage}_loss_si", loss_si, on_step=True)
-        self.log(f"{stage}_loss_mix", loss_mix, on_step=True)
-
+                
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -358,6 +367,7 @@ class WaveUNet(L.LightningModule):
             "si_snr": sisnr,
             "control_si_snr": si_snr_control,
             "mix_filename": mix_filename,
+            "mix_original_snr": int(mix_filename.split(".")[0].split("_")[-1]),  # hack
         }
 
     def configure_optimizers(self):
@@ -393,31 +403,42 @@ class WaveUNet(L.LightningModule):
             debug_dir = os.path.abspath("./test_debug_audio")
             os.makedirs(debug_dir, exist_ok=True)
             out_path = os.path.join(debug_dir, f"{batch_idx}_{mix_filename}")
+            capt = mix_filename.split(".")[0]
             sf.write(out_path, x, sr)
-
-        return wandb.Audio(x, sample_rate=sr)
+        
+        capt = mix_filename.split(".")[0]
+        return wandb.Audio(x, sample_rate=sr, caption=f"Test #{batch_idx} - {capt}")
 
     def on_test_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
         if not isinstance(outputs, dict):
             return
         mix_fname = outputs.get("mix_filename")[0]
-        pred_arr = self.to_wandb_audio(
-            outputs["pred"], FS, batch_idx, mix_filename=mix_fname
-        )
-        voice_arr = self.to_wandb_audio(
-            outputs["voice"], FS, batch_idx, mix_filename=mix_fname
-        )
-        noise_arr = self.to_wandb_audio(
-            outputs["noise"], FS, batch_idx, mix_filename=mix_fname
-        )
-        mix_arr = self.to_wandb_audio(
-            outputs["mix"], FS, batch_idx, mix_filename=mix_fname
-        )
+        
+        # log a few audio examples to wandb for demo
+        if batch_idx == 0:
+            run = self.logger.experiment  # wandb.Run
+            run.log({"noise": self.to_wandb_audio(outputs["noise"], FS, batch_idx, mix_filename=mix_fname)})
+            run.log({"mix": self.to_wandb_audio(outputs["mix"], FS, batch_idx, mix_filename=mix_fname)})
+            run.log({"pred": self.to_wandb_audio(outputs["pred"], FS, batch_idx, mix_filename=mix_fname, debug=True)})
+            run.log({"voice": self.to_wandb_audio(outputs["voice"], FS, batch_idx, mix_filename=mix_fname)})
+          
+        if batch_idx == 6:
+            run = self.logger.experiment  # wandb.Run
+            run.log({"noise": self.to_wandb_audio(outputs["noise"], FS, batch_idx, mix_filename=mix_fname)})
+            run.log({"mix": self.to_wandb_audio(outputs["mix"], FS, batch_idx, mix_filename=mix_fname)})
+            run.log({"pred": self.to_wandb_audio(outputs["pred"], FS, batch_idx, mix_filename=mix_fname, debug=True)})
+            run.log({"voice": self.to_wandb_audio(outputs["voice"], FS, batch_idx, mix_filename=mix_fname)})
+        
+        pred_arr = self.to_wandb_audio(outputs["pred"], FS, batch_idx, mix_filename=mix_fname, debug=False)
+        voice_arr = self.to_wandb_audio(outputs["voice"], FS, batch_idx, mix_filename=mix_fname)
+        noise_arr = self.to_wandb_audio(outputs["noise"], FS, batch_idx, mix_filename=mix_fname)
+        mix_arr = self.to_wandb_audio(outputs["mix"], FS, batch_idx, mix_filename=mix_fname)
         sisdr = outputs.get("sisdr").item()
         snr = outputs.get("snr").item()
         control_snr = outputs.get("control_snr").item()
         si_snr = outputs.get("si_snr").item()
         control_si_snr = outputs.get("control_si_snr").item()
+        mix_original_snr = outputs.get("mix_original_snr")
 
         self.table_data.append(
             [
@@ -432,6 +453,7 @@ class WaveUNet(L.LightningModule):
                 si_snr,
                 control_si_snr,
                 mix_fname,
+                mix_original_snr
             ]
         )
 
@@ -451,6 +473,7 @@ class WaveUNet(L.LightningModule):
                 "si_snr",
                 "control_si_snr",
                 "mix_filename",
+                "mix_original_snr",
             ],
             data=self.table_data,
         )
