@@ -26,7 +26,7 @@ class WaveDatamodule(L.LightningDataModule):
 
         # placeholders set in setup
         self.train_dataset = WaveDataset(root_dir=self.train_data_dir)
-        self.val_dataset = WaveDataset(root_dir=self.test_data_dir)
+        self.val_dataset = WaveFormVoiceNoiseDataset(root_dir=self.test_data_dir)
         self.test_dataset = WaveFormVoiceNoiseDataset(root_dir=self.test_data_dir)
 
     def train_dataloader(self):
