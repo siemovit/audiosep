@@ -25,6 +25,6 @@ command:
   - run
   - ${program}
   - fit
-  - -c=configurations/fitting/unet_svs_original_voice.yaml
+  - -c=configurations/fitting/unet_svs_original_voice_tunable.yaml
   - -c
   - ${args_json_file}
