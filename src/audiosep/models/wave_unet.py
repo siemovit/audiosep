@@ -52,7 +52,8 @@ class Encoder(nn.Module):
         self, in_ch: int, out_ch: int, kernel_size: int = 15, dropout: float = 0.0
     ):
         super().__init__()
-        self.conv = ConvBlock(in_ch, out_ch, kernel_size=kernel_size, dropout=dropout)
+        self.dropout = dropout
+        self.conv = ConvBlock(in_ch, out_ch, kernel_size=kernel_size, dropout=self.dropout)
 
     def forward(self, x: torch.Tensor):
         x = self.conv(x)
@@ -68,7 +69,8 @@ class Decoder(nn.Module):
         self, in_ch: int, out_ch: int, kernel_size: int = 5, dropout: float = 0.0
     ):
         super().__init__()
-        self.conv = ConvBlock(in_ch, out_ch, kernel_size=kernel_size, dropout=dropout)
+        self.dropout = dropout
+        self.conv = ConvBlock(in_ch, out_ch, kernel_size=kernel_size, dropout=self.dropout)
 
     def forward(self, x: torch.Tensor, skip: torch.Tensor):
         # upsample by factor 2
@@ -93,6 +95,7 @@ class WaveUNet(L.LightningModule):
                  lr: float = 1e-3, 
                  lambda_mix: float = 0.1, 
                  lambda_noise: float = 0.3, 
+                 dropout: float = 0.0,
                  mse_loss: bool = False):
         super().__init__()
         self.save_hyperparameters()
@@ -103,6 +106,7 @@ class WaveUNet(L.LightningModule):
         self.lambda_mix = lambda_mix  # weight for mix loss
         self.lr = lr
         self.lambda_noise = lambda_noise  # weight for noise loss, voice quality is prioritized
+        self.dropout = dropout
         self.mse_loss = mse_loss  # use MSE loss instead of SI-SNR
 
         # metrics
