@@ -46,7 +46,7 @@ def main():
     )
 
     # Model
-    model = WaveUNet(in_channels=1, out_channels=2, depth=args.depth, base_filters=args.base_filters)
+    model = WaveUNet(depth=args.depth, base_filters=args.base_filters)
 
     # Logger checkpoint dir
     run = logger.experiment  # should be a wandb Run
