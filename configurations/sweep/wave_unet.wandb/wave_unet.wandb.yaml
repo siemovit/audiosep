@@ -1,5 +1,5 @@
 program: scripts/runme.py
-method: grid
+method: random
 training_set: data/train_small
 early_terminate:
   type: hyperband
@@ -45,6 +45,6 @@ command:
   - run
   - ${program}
   - fit
-  - -c=configurations/fitting/waveunet.yaml
+  - -c=configurations/fitting/wave_unet.yaml
   - -c
   - ${args_json_file}
