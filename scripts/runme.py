@@ -51,6 +51,7 @@ def cli_main():
     MyLightningCLI(
         save_config_callback=CustomSaveConfigCallback,
         save_config_kwargs={"overwrite": True},
+        parser_kwargs={"parser_mode": "omegaconf"},
     )
     wandb.finish()  # really important
 

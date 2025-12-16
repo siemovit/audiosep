@@ -3,7 +3,7 @@ method: grid
 training_set: data/train_small
 metric:
   goal: maximize
-  name: val/snr
+  name: val/snr_epoch
 parameters:
   model.class_path:
     value: audiosep.models.SpectroUNetOriginalTunable

@@ -10,7 +10,7 @@ trainer:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       project: audiosep
-      name: spectro_UNetOriginal_run_fit_test
+      name: spectro_UNetOriginal_d${model.init_args.depth}_ch${model.init_args.start_channels}_do${model.init_args.dropout}
       log_model: all
   callbacks:
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
@@ -29,7 +29,7 @@ trainer:
   limit_predict_batches: null
   overfit_batches: 0.0
   val_check_interval: null
-  check_val_every_n_epoch: 1
+  check_val_every_n_epoch: 10 # validating is really slow so we do it less often
   num_sanity_val_steps: null
   log_every_n_steps: 10
   enable_checkpointing: null
