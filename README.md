@@ -22,6 +22,15 @@
     </embed>
 </object>
 
+### Where are the Jupyter Notebooks?
+
+We used WandB to log all our experiments, so there is no Jupyter notebook. Use
+the report above to see the results and analysis (the charts are interactive,
+yay!).
+
+Because WandB reports are not that powerful, we also plotted some charts with
+matplotlib, the scripts are in the [notebooks folder](./notebooks)
+
 ### Technical overview
 
 Concerning the software stack, we relied on two software utility : Pytorch
