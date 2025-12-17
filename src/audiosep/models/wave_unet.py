@@ -265,7 +265,7 @@ class WaveUNet(L.LightningModule):
         return self._shared_step(batch, "train")
 
     def validation_step(self, batch, batch_idx):
-        return self.shared_test_step(batch, "val")
+        return self.shared_test_step(batch, batch_idx, "val")
 
     @torch.no_grad()
     def infer_full_simple(self, mix, out_len, context):
@@ -326,7 +326,9 @@ class WaveUNet(L.LightningModule):
     def test_step(self, batch: WaveFormVoiceNoiseBatch, batch_idx: int):
         return self.shared_test_step(batch, batch_idx, stage="test")
 
-    def shared_test_step(self, batch: WaveFormVoiceNoiseBatch, batch_idx, stage="test"):
+    def shared_test_step(
+        self, batch: WaveFormVoiceNoiseBatch, batch_idx: int, stage="test"
+    ):
         mix, v_ref, n_ref, mix_filename = batch  # full signals
 
         # same as dataset windowing
