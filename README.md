@@ -76,6 +76,7 @@ can associate one run with the model performance.
    ```bash
    python scripts/runme.py test configurations/testing/waveunet.yaml
    ```
+6. (Optional) Record your voice reading a text and use scripts from `scripts/generalisation` to create the dataset. Then you can run a test on a model as explained before. 
 
 ### Hypertuning
 
